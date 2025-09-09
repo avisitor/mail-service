@@ -2,7 +2,7 @@ import { getPrisma } from '../../db/prisma.js';
 import { flags } from '../../config.js';
 import { renderTemplate } from '../templates/service.js';
 import { GroupCreateInput, RecipientIngestInput } from './types.js';
-import { getTemplate } from '../templates/service.js';
+// getTemplate retained via renderTemplate usage only
 import { sendEmail } from '../../providers/smtp.js';
 
 interface MemoryGroup extends GroupCreateInput { id: string; status: string; totalRecipients: number; processedRecipients: number; sentCount: number; failedCount: number; lockVersion: number; }
@@ -66,7 +66,7 @@ export async function ingestRecipients(groupId: string, input: RecipientIngestIn
     }));
     if (!data.length) return [];
     await tx.recipient.createMany({ data, skipDuplicates: true });
-    await tx.messageGroup.update({ where: { id: groupId }, data: { totalRecipients: { increment: data.length } } });
+  await tx.messageGroup.update({ where: { id: groupId }, data: { totalRecipients: { increment: data.length } } as any });
     return data;
   });
   return { added: rows.length };
@@ -138,7 +138,7 @@ export async function workerTick(limitGroups = 5, batchSize = 100) {
   for (const g of groups) {
     // optimistic lock
     try {
-      await prisma.messageGroup.update({ where: { id: g.id }, data: { status: 'processing', lockVersion: { increment: 1 }, startedAt: new Date() } });
+  await prisma.messageGroup.update({ where: { id: g.id }, data: { status: 'processing', lockVersion: { increment: 1 }, startedAt: new Date() } as any });
     } catch { continue; }
     // Rendering loop
     let done = false;
@@ -150,8 +150,8 @@ export async function workerTick(limitGroups = 5, batchSize = 100) {
           try {
             const rendered = await renderTemplate(g.templateId, r.context as any);
             if (rendered) {
-              await prisma.recipient.update({ where: { id: r.id }, data: { renderedSubject: rendered.subject, renderedHtml: rendered.html, renderedText: rendered.text, status: 'rendered' } });
-              await prisma.messageGroup.update({ where: { id: g.id }, data: { processedRecipients: { increment: 1 } } });
+              await prisma.recipient.update({ where: { id: r.id }, data: { renderedSubject: rendered.subject, renderedHtml: rendered.html, renderedText: rendered.text, status: 'rendered' } as any });
+              await prisma.messageGroup.update({ where: { id: g.id }, data: { processedRecipients: { increment: 1 } } as any });
             }
           } catch { /* swallow for now */ }
         }
@@ -162,14 +162,15 @@ export async function workerTick(limitGroups = 5, batchSize = 100) {
     while (!sendDone) {
       const toSend = await prisma.recipient.findMany({ where: { groupId: g.id, status: 'rendered' }, take: batchSize });
       if (!toSend.length) { sendDone = true; break; }
-      for (const r of toSend) {
+      for (const rRaw of toSend) {
+        const r: any = rRaw as any;
         try {
           await sendEmail({ to: r.email, subject: r.renderedSubject || 'No Subject', html: r.renderedHtml || undefined, text: r.renderedText || undefined });
-          await prisma.recipient.update({ where: { id: r.id }, data: { status: 'sent', lastError: null } });
-          await prisma.messageGroup.update({ where: { id: g.id }, data: { sentCount: { increment: 1 } } });
+          await prisma.recipient.update({ where: { id: r.id }, data: { status: 'sent', lastError: null } as any });
+          await prisma.messageGroup.update({ where: { id: g.id }, data: { sentCount: { increment: 1 } } as any });
         } catch (e: any) {
           await prisma.recipient.update({ where: { id: r.id }, data: { status: 'failed', lastError: (e?.message || 'send error'), failedAttempts: { increment: 1 } } as any });
-          await prisma.messageGroup.update({ where: { id: g.id }, data: { failedCount: { increment: 1 } } });
+          await prisma.messageGroup.update({ where: { id: g.id }, data: { failedCount: { increment: 1 } } as any });
         }
       }
     }
