@@ -2,10 +2,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var ${name}`);
-  return v;
+function required(name: string, altNames: string[] = []): string {
+  const names = [name, ...altNames];
+  for (const n of names) {
+    const v = process.env[n];
+    if (v) return v;
+  }
+  throw new Error(`Missing required env var ${names.join(' or ')}`);
 }
 
 export interface Config {
@@ -38,9 +41,9 @@ export const config: Config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   databaseUrl: required('DATABASE_URL'),
   auth: {
-    issuer: required('AUTH_ISSUER'),
-    audience: required('AUTH_AUDIENCE'),
-    jwksUri: required('AUTH_JWKS_URI'),
+    issuer: required('AUTH_ISSUER', ['OAUTH_ISSUER']),
+    audience: required('AUTH_AUDIENCE', ['OAUTH_AUDIENCE']),
+    jwksUri: required('AUTH_JWKS_URI', ['JWKS_URL']),
   },
   smtp: {
     host: required('SMTP_HOST'),

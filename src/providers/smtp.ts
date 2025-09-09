@@ -26,6 +26,11 @@ export async function sendEmail(input: SendEmailInput) {
   if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
     return; // pretend success
   }
+  if (process.env.TEST_FAIL_ONCE === 'true') {
+    // flip flag so only first attempt fails
+    delete process.env.TEST_FAIL_ONCE;
+    throw new Error('Simulated transient timeout');
+  }
   const t = getTransporter();
   await t.sendMail({
     from: config.smtp.fromDefault || config.smtp.user,
