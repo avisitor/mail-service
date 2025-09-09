@@ -1,5 +1,4 @@
--- Manual initial migration for mail-service schema
--- NOTE: Validate against Prisma schema before applying to production.
+-- Rebased initial migration combining prior init + groups/recipients + send pipeline so fresh DB applies cleanly
 
 CREATE TABLE Tenant (
   id varchar(191) PRIMARY KEY,
@@ -47,6 +46,12 @@ CREATE TABLE MessageGroup (
   completedAt datetime(3) NULL,
   createdBy varchar(191) NULL,
   createdAt datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  totalRecipients int NOT NULL DEFAULT 0,
+  processedRecipients int NOT NULL DEFAULT 0,
+  sentCount int NOT NULL DEFAULT 0,
+  failedCount int NOT NULL DEFAULT 0,
+  canceledAt datetime(3) NULL,
+  lockVersion int NOT NULL DEFAULT 0,
   CONSTRAINT fk_group_tenant FOREIGN KEY (tenantId) REFERENCES Tenant(id) ON DELETE CASCADE,
   CONSTRAINT fk_group_app FOREIGN KEY (appId) REFERENCES App(id) ON DELETE CASCADE,
   CONSTRAINT fk_group_template FOREIGN KEY (templateId) REFERENCES Template(id) ON DELETE SET NULL
@@ -61,7 +66,12 @@ CREATE TABLE Recipient (
   status varchar(32) NOT NULL DEFAULT 'pending',
   lastError text NULL,
   createdAt datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  renderedSubject text NULL,
+  renderedHtml mediumtext NULL,
+  renderedText mediumtext NULL,
+  failedAttempts int NOT NULL DEFAULT 0,
   CONSTRAINT fk_recipient_group FOREIGN KEY (groupId) REFERENCES MessageGroup(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_recipient_group_email (groupId, email),
   KEY idx_recipient_group_status (groupId, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -72,6 +82,8 @@ CREATE TABLE Message (
   sentAt datetime(3) NULL,
   openedAt datetime(3) NULL,
   createdAt datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  attemptCount int NOT NULL DEFAULT 1,
+  lastError text NULL,
   CONSTRAINT fk_message_recipient FOREIGN KEY (recipientId) REFERENCES Recipient(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
