@@ -5,6 +5,7 @@ import helmet from '@fastify/helmet';
 import { config, flags } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
 import authPlugin from './auth/plugin.js';
+import { registerTemplateRoutes } from './modules/templates/routes.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -25,6 +26,7 @@ export function buildApp() {
 
   // Routes
   registerHealthRoutes(app);
+  registerTemplateRoutes(app);
 
   app.get('/', async () => ({ service: 'mail-service', status: 'ok' }));
 
