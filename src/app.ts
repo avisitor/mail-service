@@ -2,8 +2,9 @@ import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import { config } from './config.js';
+import { config, flags } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
+import authPlugin from './auth/plugin.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -16,6 +17,11 @@ export function buildApp() {
   app.register(sensible);
   app.register(cors, { origin: true });
   app.register(helmet, { global: true });
+
+  // Auth (can be toggled off in test env)
+  if (!flags.disableAuth && config.env !== 'test') {
+    app.register(authPlugin);
+  }
 
   // Routes
   registerHealthRoutes(app);

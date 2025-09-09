@@ -55,3 +55,7 @@ export const config: Config = {
     batchSize: parseInt(process.env.SCHEDULER_BATCH_SIZE || '100', 10),
   },
 };
+
+export const flags = {
+  disableAuth: (process.env.DISABLE_AUTH || 'false').toLowerCase() === 'true',
+};
