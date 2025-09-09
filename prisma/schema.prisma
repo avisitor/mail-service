@@ -88,6 +88,7 @@ model Recipient {
   renderedSubject String?
   renderedHtml    String?
   renderedText    String?
+  failedAttempts  Int @default(0)
   messages    Message[]
   events      Event[]
   @@index([groupId, status])
@@ -102,6 +103,8 @@ model Message {
   sentAt      DateTime?
   openedAt    DateTime?
   createdAt   DateTime  @default(now())
+  attemptCount Int @default(1)
+  lastError    String?
 }
 
 model Event {
