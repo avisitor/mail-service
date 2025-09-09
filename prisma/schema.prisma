@@ -1,0 +1,118 @@
+// Prisma schema (initial draft)
+// Switch provider or refine types as needed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String    @id @default(cuid())
+  name      String
+  status    String    @default("active")
+  createdAt DateTime  @default(now())
+  apps      App[]
+  templates Template[]
+  groups    MessageGroup[]
+  suppressions Suppression[]
+}
+
+model App {
+  id        String   @id @default(cuid())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId  String
+  name      String
+  clientId  String   @unique
+  createdAt DateTime @default(now())
+  groups    MessageGroup[]
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId    String
+  name        String
+  version     Int
+  subject     String
+  bodyHtml    String
+  bodyText    String?
+  variables   Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  groups      MessageGroup[]
+  @@unique([tenantId, name, version])
+}
+
+model MessageGroup {
+  id           String      @id @default(cuid())
+  tenant       Tenant      @relation(fields: [tenantId], references: [id])
+  tenantId     String
+  app          App         @relation(fields: [appId], references: [id])
+  appId        String
+  template     Template?   @relation(fields: [templateId], references: [id])
+  templateId   String?
+  subject      String
+  bodyOverrideHtml String?
+  bodyOverrideText String?
+  status       String      @default("draft") // draft|scheduled|processing|complete|failed|canceled
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdBy    String?
+  createdAt    DateTime    @default(now())
+  recipients   Recipient[]
+  events       Event[]
+}
+
+model Recipient {
+  id          String       @id @default(cuid())
+  group       MessageGroup @relation(fields: [groupId], references: [id])
+  groupId     String
+  email       String
+  name        String?
+  context     Json
+  status      String       @default("pending") // pending|rendered|sent|failed|skipped
+  lastError   String?
+  createdAt   DateTime     @default(now())
+  messages    Message[]
+  events      Event[]
+  @@index([groupId, status])
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  recipient   Recipient @relation(fields: [recipientId], references: [id])
+  recipientId String
+  providerId  String?
+  sentAt      DateTime?
+  openedAt    DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Event {
+  id          String       @id @default(cuid())
+  recipient   Recipient?   @relation(fields: [recipientId], references: [id])
+  recipientId String?
+  group       MessageGroup? @relation(fields: [groupId], references: [id])
+  groupId     String?
+  type        String
+  occurredAt  DateTime  @default(now())
+  meta        Json?
+  createdAt   DateTime  @default(now())
+  @@index([type])
+}
+
+model Suppression {
+  id        String   @id @default(cuid())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId  String
+  email     String
+  reason    String?
+  addedAt   DateTime @default(now())
+  @@index([tenantId, email])
+}

@@ -1,0 +1,23 @@
+# Node
+node_modules/
+dist/
+coverage/
+.env
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# Prisma / DB
+prisma/.env
+
+# Optional editor
+.vscode/
+.idea/
