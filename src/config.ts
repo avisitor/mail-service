@@ -58,4 +58,5 @@ export const config: Config = {
 
 export const flags = {
   disableAuth: (process.env.DISABLE_AUTH || 'false').toLowerCase() === 'true',
+  useInMemory: (process.env.USE_INMEMORY_DB || 'false').toLowerCase() === 'true',
 };

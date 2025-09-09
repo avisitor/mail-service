@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { getPrisma } from '../src/db/prisma.js';
 import { flags } from '../src/config.js';
 
 // Disable auth during tests for simplicity
@@ -9,15 +8,13 @@ flags.disableAuth = true as any;
 describe('templates', () => {
   it('creates and renders a template', async () => {
     const app = buildApp();
-    const prisma = getPrisma();
-    // Seed tenant
-    const tenant = await prisma.tenant.create({ data: { name: 'TestTenant' } });
+  const tenant = { id: 'tenant1' };
 
     const createRes = await app.inject({
       method: 'POST',
       url: '/templates',
       payload: {
-        tenantId: tenant.id,
+  tenantId: tenant.id,
         name: 'welcome',
         version: 1,
         subject: 'Hello {{name}}',
