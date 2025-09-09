@@ -23,6 +23,9 @@ export interface SendEmailInput {
 }
 
 export async function sendEmail(input: SendEmailInput) {
+  if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
+    return; // pretend success
+  }
   const t = getTransporter();
   await t.sendMail({
     from: config.smtp.fromDefault || config.smtp.user,
