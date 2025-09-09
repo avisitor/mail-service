@@ -65,6 +65,12 @@ model MessageGroup {
   completedAt  DateTime?
   createdBy    String?
   createdAt    DateTime    @default(now())
+  totalRecipients       Int @default(0)
+  processedRecipients   Int @default(0)
+  sentCount             Int @default(0)
+  failedCount           Int @default(0)
+  canceledAt            DateTime?
+  lockVersion           Int @default(0)
   recipients   Recipient[]
   events       Event[]
 }
@@ -79,9 +85,13 @@ model Recipient {
   status      String       @default("pending") // pending|rendered|sent|failed|skipped
   lastError   String?
   createdAt   DateTime     @default(now())
+  renderedSubject String?
+  renderedHtml    String?
+  renderedText    String?
   messages    Message[]
   events      Event[]
   @@index([groupId, status])
+  @@unique([groupId, email])
 }
 
 model Message {
