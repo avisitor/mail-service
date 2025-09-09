@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { groupCreateSchema, recipientIngestSchema } from './types.js';
 import { createGroup, getGroup, ingestRecipients, listGroupRecipients, scheduleGroup, workerTick } from './service.js';
+import { getPrisma } from '../../db/prisma.js';
 
 export async function registerGroupRoutes(app: FastifyInstance) {
   app.post('/groups', { preValidation: app.authenticate }, async (req, reply) => {
@@ -44,5 +45,19 @@ export async function registerGroupRoutes(app: FastifyInstance) {
 
   app.post('/internal/worker/tick', { preValidation: app.authenticate }, async () => {
     return workerTick();
+  });
+
+  // Tracking pixel: /t/p/:messageId.png  (messageId == recipientId for now)
+  app.get('/t/p/:recipientId.png', async (req, reply) => {
+    const { recipientId } = req.params as any;
+    const prisma = getPrisma();
+    try {
+      await prisma.message.updateMany({ where: { recipientId }, data: { openedAt: new Date() } });
+      await prisma.event.create({ data: { recipientId, type: 'open' } });
+    } catch { /* ignore */ }
+    // 1x1 transparent PNG
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=', 'base64');
+    reply.header('Content-Type', 'image/png');
+    reply.send(png);
   });
 }
