@@ -23,17 +23,22 @@ export interface SendEmailInput {
 }
 
 export async function sendEmail(input: SendEmailInput) {
-  if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
-    return; // pretend success
-  }
   if (process.env.TEST_FAIL_ONCE === 'true') {
     // flip flag so only first attempt fails
     delete process.env.TEST_FAIL_ONCE;
     throw new Error('Simulated transient timeout');
   }
+  if (process.env.TEST_FAIL_ALWAYS === 'true') {
+    throw new Error('Simulated permanent failure');
+  }
+  if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
+    return; // pretend success
+  }
   const t = getTransporter();
+  const fromAddr = config.smtp.fromDefault || config.smtp.user;
+  const from = config.smtp.fromName && fromAddr ? `${config.smtp.fromName} <${fromAddr}>` : fromAddr;
   await t.sendMail({
-    from: config.smtp.fromDefault || config.smtp.user,
+    from,
     to: input.to,
     subject: input.subject,
     html: input.html,

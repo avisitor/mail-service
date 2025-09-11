@@ -16,10 +16,19 @@ export interface Config {
   port: number;
   logLevel: string;
   databaseUrl: string;
+  tls?: {
+    keyFile?: string;
+    certFile?: string;
+    caFile?: string;
+  };
   auth: {
     issuer: string;
     audience: string;
     jwksUri: string;
+  roleClaim: string;
+  tenantClaim: string;
+  appClaim: string;
+  idpLoginUrl?: string;
   };
   smtp: {
     host: string;
@@ -28,6 +37,7 @@ export interface Config {
     pass?: string;
     secure: boolean;
     fromDefault?: string;
+  fromName?: string;
   };
   scheduler: {
     pollIntervalMs: number;
@@ -40,10 +50,19 @@ export const config: Config = {
   port: parseInt(process.env.PORT || '3100', 10),
   logLevel: process.env.LOG_LEVEL || 'info',
   databaseUrl: required('DATABASE_URL'),
+  tls: {
+    keyFile: process.env.TLS_KEY_FILE,
+    certFile: process.env.TLS_CERT_FILE,
+    caFile: process.env.TLS_CA_FILE,
+  },
   auth: {
     issuer: required('AUTH_ISSUER', ['OAUTH_ISSUER']),
     audience: required('AUTH_AUDIENCE', ['OAUTH_AUDIENCE']),
     jwksUri: required('AUTH_JWKS_URI', ['JWKS_URL']),
+  roleClaim: process.env.AUTH_ROLE_CLAIM || 'roles',
+  tenantClaim: process.env.AUTH_TENANT_CLAIM || 'tenantId',
+  appClaim: process.env.AUTH_APP_CLAIM || 'appId',
+  idpLoginUrl: process.env.AUTH_IDP_LOGIN_URL,
   },
   smtp: {
     host: required('SMTP_HOST'),
@@ -51,7 +70,9 @@ export const config: Config = {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
     secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-    fromDefault: process.env.SMTP_FROM_DEFAULT,
+    // Support either SMTP_FROM_DEFAULT (new) or legacy SMTP_FROM_ADDRESS
+    fromDefault: process.env.SMTP_FROM_DEFAULT || process.env.SMTP_FROM_ADDRESS,
+  fromName: process.env.SMTP_FROM_NAME,
   },
   scheduler: {
     pollIntervalMs: parseInt(process.env.SCHEDULER_POLL_MS || '5000', 10),
@@ -61,5 +82,5 @@ export const config: Config = {
 
 export const flags = {
   disableAuth: (process.env.DISABLE_AUTH || 'false').toLowerCase() === 'true',
-  useInMemory: (process.env.USE_INMEMORY_DB || 'false').toLowerCase() === 'true',
+  disableScheduler: (process.env.DISABLE_SCHEDULER || 'false').toLowerCase() === 'true',
 };

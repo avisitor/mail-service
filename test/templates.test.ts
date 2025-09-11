@@ -1,20 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { flags } from '../src/config.js';
+import { config, flags } from '../src/config.js';
+import { getPrisma } from '../src/db/prisma.js';
 
 // Disable auth during tests for simplicity
 flags.disableAuth = true as any;
 
-describe('templates', () => {
+const dbValid = (config.databaseUrl || '').startsWith('mysql://');
+
+describe('templates (db)', () => {
+  if (!dbValid) {
+    it.skip('skipped because DATABASE_URL is not mysql://', () => {});
+    return;
+  }
   it('creates and renders a template', async () => {
     const app = buildApp();
-  const tenant = { id: 'tenant1' };
-
     const createRes = await app.inject({
       method: 'POST',
       url: '/templates',
       payload: {
-  tenantId: tenant.id,
+        tenantId: 'tenant_mem',
         name: 'welcome',
         version: 1,
         subject: 'Hello {{name}}',
@@ -25,7 +30,6 @@ describe('templates', () => {
     });
     expect(createRes.statusCode).toBe(201);
     const created = JSON.parse(createRes.payload);
-
     const renderRes = await app.inject({
       method: 'POST',
       url: `/templates/${created.id}/render`,

@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { flags } from '../src/config.js';
+import { config, flags } from '../src/config.js';
 
 flags.disableAuth = true as any;
-flags.useInMemory = true as any;
+const dbValid = (config.databaseUrl || '').startsWith('mysql://');
 
-describe('groups & recipients', () => {
+describe('groups & recipients (db)', () => {
+  if (!dbValid) {
+    it.skip('skipped because DATABASE_URL is not mysql://', () => {});
+    return;
+  }
   it('creates group and ingests recipients with dedupe', async () => {
     const app = buildApp();
 
