@@ -3,6 +3,7 @@ import fastifyJwt, { FastifyJWTOptions } from '@fastify/jwt';
 import { getSigningKey } from './jwks.js';
 import { config } from '../config.js';
 import { extractUser, UserContext } from './roles.js';
+import { resolveRoles } from './roleResolver.js';
 
 export default fp(async function authPlugin(app) {
   app.register(fastifyJwt, <FastifyJWTOptions>{
@@ -45,9 +46,20 @@ export default fp(async function authPlugin(app) {
   app.decorate('authenticate', async function (request, reply) {
     try {
       await request.jwtVerify();
-      // attach user context
+      // Build initial context from token (sub + optional tenant/app hints)
+      const base = extractUser(request);
+      if (!base) throw new Error('No user context in token');
+      // Derive roles from DB bindings (Option 1: app-owned authorization)
+      try {
+        const derived = await resolveRoles({ userSub: base.sub, tenantId: base.tenantId, appId: base.appId });
+        base.roles = derived as any;
+      } catch (e) {
+        if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
+          try { app.log.warn({ err: (e as any)?.message || String(e) }, 'role resolution failed'); } catch {}
+        }
+      }
       // @ts-ignore
-      request.userContext = extractUser(request);
+      request.userContext = base;
     } catch (err) {
       if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
         try {

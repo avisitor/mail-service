@@ -17,6 +17,7 @@ import { registerAppRoutes } from './modules/apps/routes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
+import { resolveRoles } from './auth/roleResolver.js';
 
 export function buildApp() {
   // Optional pretty logging in development if pino-pretty is installed; fall back silently if not.
@@ -59,7 +60,7 @@ export function buildApp() {
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
-    const uc = req.userContext || null;
+  let uc = req.userContext || null;
     if (!uc) return null;
     try {
       const prismaModule = await import('./db/prisma.js');
@@ -76,6 +77,11 @@ export function buildApp() {
       }
       // Prefer explicit clientId from token if present, else DB value
   const clientId = tokenAny.clientId || appRec?.clientId || null;
+  // Re-derive roles (ensures updates after initial token verification)
+  try {
+    const freshRoles = await resolveRoles({ userSub: uc.sub, tenantId: uc.tenantId, appId: uc.appId });
+    uc = { ...uc, roles: freshRoles as any };
+  } catch {}
   return { ...uc, tenantName: tenant?.name || null, appName: appRec?.name || null, appClientId: clientId };
     } catch {
       return uc;

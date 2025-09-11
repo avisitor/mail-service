@@ -129,3 +129,26 @@ model Suppression {
   addedAt   DateTime @default(now())
   @@index([tenantId, email])
 }
+
+// Application-owned authorization: role bindings that map a user (by subject)
+// to a role within an optional scope. scopeType + scopeId define where the
+// role applies. For global roles (e.g. superadmin) use scopeType = GLOBAL and
+// scopeId = null. For tenant-scoped roles use TENANT + tenantId in scopeId.
+// For app-scoped roles use APP + appId in scopeId.
+enum ScopeType {
+  GLOBAL
+  TENANT
+  APP
+}
+
+model RoleBinding {
+  id        String    @id @default(cuid())
+  userSub   String
+  scopeType ScopeType
+  scopeId   String?   // nullable for GLOBAL
+  role      String    // e.g. superadmin | tenant_admin | editor
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  @@index([userSub, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+}
