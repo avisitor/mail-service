@@ -106,7 +106,7 @@ npm run token -- --roles tenant_admin,editor --tenant tenantA --app app1
 curl -H "authorization: Bearer $(npm run -s token -- --roles superadmin)" http://localhost:3100/tenants
 ```
 
-The role claim defaults to `roles`, tenant to `tenantId`, app to `appId` (configurable via env). Tokens are RS256 signed using the generated key and validated through the JWKS endpoint.
+The token now purposely contains only identity + basic scoping hints (subject, optional tenantId/appId/clientId) and MAY omit any `roles` claim entirely. Authorization is resolved server‑side from the database (see Authorization Model below). If a `roles` claim is present (e.g. from an older IDP version) it is ignored for effective permissions.
 
 ### Browser SSO Redirect Contract
 
@@ -133,6 +133,50 @@ Troubleshooting auth:
 
 ## Env Variables (.env.example)
 See `.env.example` for all settings (DB, OAuth2 issuer, JWKS, etc.).
+
+## Authorization Model (Option 1: Application‑Owned)
+
+Instead of trusting role claims issued by the IDP, the mail-service derives roles from its own `RoleBinding` table. This decouples authentication (who the user is) from authorization (what they can do) and allows the IDP to remain ignorant of application/tenant specifics or external providers (e.g. Google, other OIDC issuers).
+
+Prisma model (simplified):
+
+```
+enum ScopeType { GLOBAL TENANT APP }
+
+model RoleBinding {
+  id        String    @id @default(cuid())
+  userSub   String
+  scopeType ScopeType
+  scopeId   String?   // null for GLOBAL
+  role      String    // superadmin | tenant_admin | editor
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  @@index([userSub, scopeType, scopeId])
+}
+```
+
+Resolution algorithm (per request):
+1. Authenticate JWT (issuer/audience + signature via JWKS).
+2. Extract `sub`, plus optional `tenantId` / `appId` hints from token (if present). These hints are not trusted for permission—only for scoping lookups.
+3. Load all matching bindings for: GLOBAL + (TENANT + tenantId) + (APP + appId).
+4. Merge distinct roles; attach to `request.userContext`.
+5. Route guards check for required roles (e.g. superadmin for tenant CRUD, tenant_admin or superadmin for app/template ops, editor for composition).
+
+Initial bootstrap: manually insert a GLOBAL superadmin binding for your admin user (their JWT `sub`). Example SQL:
+
+```sql
+INSERT INTO RoleBinding (id,userSub,scopeType,scopeId,role,createdAt,updatedAt)
+VALUES (REPLACE(UUID(),'-',''), 'admin@example.com', 'GLOBAL', NULL, 'superadmin', NOW(), NOW());
+```
+
+Changing roles takes effect on the next request (no need to re-issue tokens) because roles are re-resolved for every authenticated call.
+
+Why this approach:
+- IDP stays generic (can add Google / other identity sources later).
+- Each application owns its authorization rules & data.
+- Revoking a role is immediate without forcing logouts.
+
+Future evolution (optional): introduce a centralized authz service; current resolver abstraction makes that a drop-in replacement.
 
 ## Next Steps
 - Flesh out Prisma schema & initial migration
