@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "PORT=3100 NODE_ENV=development DISABLE_AUTH=true SMTP_HOST=localhost AUTH_ISSUER=local AUTH_AUDIENCE=local AUTH_JWKS_URI=http://localhost/jwks.json nodemon --watch src --ext ts,js,json --signal SIGTERM --exec \"node --loader ts-node/esm src/server.ts\"",
-    "dev:esm": "NODE_ENV=development DISABLE_AUTH=true SMTP_HOST=localhost AUTH_ISSUER=local AUTH_AUDIENCE=local AUTH_JWKS_URI=http://localhost/jwks.json node --loader ts-node/esm src/server.ts",
+    "dev": "PORT=3100 NODE_ENV=development nodemon --watch src --ext ts,js,json --signal SIGTERM --exec \"node --loader ts-node/esm src/server.ts\"",
+    "dev:esm": "NODE_ENV=development node --loader ts-node/esm src/server.ts",
     "build": "tsc -p tsconfig.json",
     "postbuild": "mkdir -p dist/src/frontend && cp -f src/frontend/index.html src/frontend/styles.css dist/src/frontend/ 2>/dev/null || true",
     "start": "node dist/src/server.js",

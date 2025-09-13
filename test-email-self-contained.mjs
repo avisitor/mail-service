@@ -4,6 +4,8 @@
  * Creates its own test hierarchy, runs tests, and cleans up afterwards
  */
 
+import { getAdaptiveHeaders } from './test-utils/auth.mjs';
+
 const API_BASE = 'http://localhost:3100';
 const MAILHOG_API = 'http://localhost:8025/api/v2';
 
@@ -16,11 +18,26 @@ let testData = {
   sesConfig: null
 };
 
+// Global variable to cache auth headers once determined
+let authHeaders = null;
+
+async function getHeaders() {
+  if (authHeaders === null) {
+    authHeaders = await getAdaptiveHeaders({ 
+      roles: ['superadmin']  // Need superadmin to create tenants and apps
+    }, API_BASE);
+  }
+  return authHeaders;
+}
+
 async function apiCall(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  const headers = await getHeaders();
+  
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...headers,
       ...options.headers
     },
     ...options
@@ -31,7 +48,20 @@ async function apiCall(endpoint, options = {}) {
     throw new Error(`API call failed: ${response.status} ${error}`);
   }
   
-  return response.json();
+  // Handle 204 No Content responses (like DELETE operations)
+  if (response.status === 204) {
+    return null;
+  }
+  
+  // Check if response has content before trying to parse JSON
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    return response.json();
+  }
+  
+  // If no JSON content type, return text
+  const text = await response.text();
+  return text ? text : null;
 }
 
 async function checkMailHogAvailable() {
@@ -159,39 +189,63 @@ async function setupTestHierarchy() {
 async function cleanupTestHierarchy() {
   console.log('\n🧹 Cleaning up test hierarchy...');
   
-  try {
-    // Delete configurations
-    if (testData.smtpConfig) {
-      await apiCall(`/smtp-configs/${testData.smtpConfig.id}`, { method: 'DELETE' });
-      console.log(`   ✓ Deleted SMTP config: ${testData.smtpConfig.id}`);
+  const cleanupErrors = [];
+  
+  // Helper function to safely delete an item
+  async function safeDelete(description, deleteFunc) {
+    try {
+      await deleteFunc();
+      console.log(`   ✓ ${description}`);
+    } catch (error) {
+      const errorMsg = `Failed to delete ${description}: ${error.message}`;
+      console.log(`   ⚠️  ${errorMsg}`);
+      cleanupErrors.push(errorMsg);
     }
-    
-    if (testData.sesConfig) {
-      await apiCall(`/smtp-configs/${testData.sesConfig.id}`, { method: 'DELETE' });
-      console.log(`   ✓ Deleted SES config: ${testData.sesConfig.id}`);
-    }
+  }
+  
+  // Delete configurations first (dependencies before parents)
+  if (testData.smtpConfig && testData.smtpConfig.id) {
+    await safeDelete(
+      `SMTP config: ${testData.smtpConfig.id}`,
+      () => apiCall(`/smtp-configs/${testData.smtpConfig.id}`, { method: 'DELETE' })
+    );
+  }
+  
+  if (testData.sesConfig && testData.sesConfig.id) {
+    await safeDelete(
+      `SES config: ${testData.sesConfig.id}`,
+      () => apiCall(`/smtp-configs/${testData.sesConfig.id}`, { method: 'DELETE' })
+    );
+  }
 
-    // Delete apps
-    if (testData.smtpApp) {
-      await apiCall(`/apps/${testData.smtpApp.id}`, { method: 'DELETE' });
-      console.log(`   ✓ Deleted SMTP app: ${testData.smtpApp.id}`);
-    }
-    
-    if (testData.sesApp) {
-      await apiCall(`/apps/${testData.sesApp.id}`, { method: 'DELETE' });
-      console.log(`   ✓ Deleted SES app: ${testData.sesApp.id}`);
-    }
+  // Delete apps
+  if (testData.smtpApp && testData.smtpApp.id) {
+    await safeDelete(
+      `SMTP app: ${testData.smtpApp.id}`,
+      () => apiCall(`/apps/${testData.smtpApp.id}`, { method: 'DELETE' })
+    );
+  }
+  
+  if (testData.sesApp && testData.sesApp.id) {
+    await safeDelete(
+      `SES app: ${testData.sesApp.id}`,
+      () => apiCall(`/apps/${testData.sesApp.id}`, { method: 'DELETE' })
+    );
+  }
 
-    // Delete tenant
-    if (testData.tenant) {
-      await apiCall(`/tenants/${testData.tenant.id}`, { method: 'DELETE' });
-      console.log(`   ✓ Deleted tenant: ${testData.tenant.id}`);
-    }
+  // Delete tenant last
+  if (testData.tenant && testData.tenant.id) {
+    await safeDelete(
+      `tenant: ${testData.tenant.id}`,
+      () => apiCall(`/tenants/${testData.tenant.id}`, { method: 'DELETE' })
+    );
+  }
 
-    console.log('✅ Cleanup complete');
-
-  } catch (error) {
-    console.error('⚠️  Cleanup encountered errors:', error.message);
+  if (cleanupErrors.length > 0) {
+    console.log(`⚠️  Cleanup completed with ${cleanupErrors.length} error(s):`);
+    cleanupErrors.forEach(error => console.log(`     - ${error}`));
+  } else {
+    console.log('✅ Cleanup completed successfully');
   }
 }
 
@@ -496,12 +550,22 @@ async function main() {
 
   } catch (error) {
     console.error('\n❌ Test suite failed:', error.message);
+    console.error('Stack trace:', error.stack);
     process.exitCode = 1;
   } finally {
     // Always cleanup
     if (setupSuccessful) {
       await cleanupTestHierarchy();
     }
+    
+    // Final status based on exit code
+    console.log('\n' + '='.repeat(50));
+    if (process.exitCode === 1) {
+      console.log('❌ TEST SUITE FAILED - Check errors above');
+    } else {
+      console.log('✅ TEST SUITE PASSED - All tests successful');
+    }
+    console.log('='.repeat(50));
   }
 }
 

@@ -54,7 +54,7 @@ model MessageGroup {
   id           String      @id @default(cuid())
   tenant       Tenant      @relation(fields: [tenantId], references: [id])
   tenantId     String
-  app          App         @relation(fields: [appId], references: [id])
+  app          App         @relation(fields: [appId], references: [id], onDelete: Cascade)
   appId        String
   template     Template?   @relation(fields: [templateId], references: [id])
   templateId   String?
@@ -79,7 +79,7 @@ model MessageGroup {
 
 model Recipient {
   id          String       @id @default(cuid())
-  group       MessageGroup @relation(fields: [groupId], references: [id])
+  group       MessageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId     String
   email       String
   name        String?
@@ -99,7 +99,7 @@ model Recipient {
 
 model Message {
   id          String    @id @default(cuid())
-  recipient   Recipient @relation(fields: [recipientId], references: [id])
+  recipient   Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   recipientId String
   providerId  String?
   sentAt      DateTime?
@@ -111,9 +111,9 @@ model Message {
 
 model Event {
   id          String       @id @default(cuid())
-  recipient   Recipient?   @relation(fields: [recipientId], references: [id])
+  recipient   Recipient?   @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   recipientId String?
-  group       MessageGroup? @relation(fields: [groupId], references: [id])
+  group       MessageGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId     String?
   type        String
   occurredAt  DateTime  @default(now())
@@ -144,7 +144,7 @@ model SmtpConfig {
   tenantId    String?        // null for GLOBAL scope
   appId       String?        // null for GLOBAL/TENANT scope
   tenant      Tenant?        @relation(fields: [tenantId], references: [id])
-  app         App?           @relation(fields: [appId], references: [id])
+  app         App?           @relation(fields: [appId], references: [id], onDelete: Cascade)
   
   // SMTP settings
   host        String

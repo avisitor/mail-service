@@ -32,4 +32,18 @@ export async function registerAppRoutes(app: FastifyInstance) {
     const prisma = getPrisma();
     return prisma.app.findMany({ where: tenantId ? { tenantId } : undefined, orderBy: { createdAt: 'desc' } });
   });
+
+  app.delete('/apps/:id', async (req, reply) => {
+    const userContext = await AuthService.requireRole(req, reply, ['tenant_admin', 'superadmin']);
+    if (!userContext) return; // Response already sent
+
+    const { id } = req.params as any;
+    const prisma = getPrisma();
+    try {
+      await prisma.app.delete({ where: { id } });
+      return { ok: true };
+    } catch (e: any) {
+      return reply.badRequest(e.message);
+    }
+  });
 }

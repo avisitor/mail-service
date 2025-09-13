@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../../db/prisma.js';
 import { AuthService } from '../../auth/service.js';
+import { hasRole } from '../../auth/roles.js';
 import { customAlphabet } from 'nanoid';
 
 const nano = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 12);

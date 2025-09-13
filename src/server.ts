@@ -14,6 +14,19 @@ async function main() {
   }
   const app = buildApp();
   await app.listen({ port: config.port, host: '0.0.0.0' });
+  
+  // Log startup environment for debugging
+  app.log.info({
+    port: config.port,
+    env: config.env,
+    disableAuth: flags.disableAuth,
+    disableScheduler: flags.disableScheduler,
+    databaseUrl: config.databaseUrl ? 'SET' : 'NOT SET',
+    smtpHost: config.smtp.host,
+    smtpPort: config.smtp.port,
+    smtpDryRun: process.env.SMTP_DRY_RUN
+  }, 'Server startup configuration');
+  
   // Log effective auth posture at startup for diagnostics
   try {
     app.log.info({ env: config.env, disableAuth: flags.disableAuth, issuer: config.auth.issuer, audience: config.auth.audience, jwks: config.auth.jwksUri }, 'auth startup config');

@@ -4,17 +4,35 @@
  * Tests email sending through the REST API endpoints
  */
 
+import { getAuthHeaders, getAdaptiveHeaders } from './test-utils/auth.mjs';
+
 const SANDBOX_TENANT_ID = 'cmfgkxlyt000010msi8qxmraa'; // Email Testing Sandbox
 const SMTP_APP_ID = 'cmfgkybbi000410mssq4gnw8a'; // SMTP Testing App
 const SES_APP_ID = 'cmfhkgpjt000132tq2w9859k7'; // SES Testing App (no config - inherits from tenant)
 const API_BASE = 'http://localhost:3100';
 const MAILHOG_API = 'http://localhost:8025/api/v2';
 
+// Global variable to cache auth headers once determined
+let authHeaders = null;
+
+async function getHeaders() {
+  if (authHeaders === null) {
+    authHeaders = await getAdaptiveHeaders({ 
+      roles: ['admin'], 
+      tenantId: SANDBOX_TENANT_ID 
+    }, API_BASE);
+  }
+  return authHeaders;
+}
+
 async function apiCall(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  const headers = await getHeaders();
+  
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...headers,
       ...options.headers
     },
     ...options
