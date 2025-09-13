@@ -3,6 +3,7 @@ import { renderTemplate } from '../templates/service.js';
 import { dbReady } from '../../db/state.js';
 import { GroupCreateInput, RecipientIngestInput } from './types.js';
 import { sendEmail } from '../../providers/smtp.js';
+import { config } from '../../config.js';
 
 const MAX_ATTEMPTS = 3;
 const RETRYABLE_ERRORS = [/timeout/i, /rate/i, /connection/i];
@@ -48,7 +49,7 @@ export async function scheduleGroup(id: string, when?: Date) {
 
 export async function workerTick(limitGroups = 5, batchSize = 100) {
   // Extra hard guard: only proceed if database preflight succeeded AND url starts with mysql://
-  const url = process.env.DATABASE_URL || '';
+  const url = config.databaseUrl || '';
   if (isPrismaDisabled() || !dbReady || !url.startsWith('mysql://')) {
     return { groupsProcessed: 0 };
   }
@@ -96,7 +97,14 @@ export async function workerTick(limitGroups = 5, batchSize = 100) {
         while (attempt < MAX_ATTEMPTS && !sent) {
           attempt += 1;
           try {
-            await sendEmail({ to: r.email, subject: r.renderedSubject || 'No Subject', html: r.renderedHtml || undefined, text: r.renderedText || undefined });
+            await sendEmail({ 
+              to: r.email, 
+              subject: r.renderedSubject || 'No Subject', 
+              html: r.renderedHtml || undefined, 
+              text: r.renderedText || undefined,
+              tenantId: g.tenantId,
+              appId: g.appId,
+            });
             sent = true;
             await prisma.message.create({ data: { recipientId: r.id, sentAt: new Date(), attemptCount: attempt } });
             await prisma.recipient.update({ where: { id: r.id }, data: { status: 'sent', lastError: null, failedAttempts: attempt - 1 } });

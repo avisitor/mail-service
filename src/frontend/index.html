@@ -13,6 +13,7 @@
       <nav class="topnav">
         <button data-view="tenants" class="navBtn">Tenants</button>
         <button data-view="compose" class="navBtn">Compose</button>
+        <button data-view="smtp-config" class="navBtn">SMTP Config</button>
       </nav>
       <div class="env" id="envInfo"></div>
       <div class="userPane" id="userPane" style="display:none">
@@ -125,6 +126,106 @@
         </form>
       </section>
     </main>
+    <main class="layout" id="view-smtp-config" style="display:none">
+      <section class="panel fullwidth" id="roleSimulator" style="background: #2a2a2a; border: 1px solid #555; margin-bottom: 15px;">
+        <h3 style="margin-top: 0; color: #ffa500;">Role Simulator (Testing Only)</h3>
+        <div class="grid" style="grid-template-columns: auto auto auto auto; gap: 15px; align-items: center;">
+          <label>Role:
+            <select id="roleSelect" style="width: 150px;">
+              <option value="super-admin">Super Admin</option>
+              <option value="tenant-admin">Tenant Admin</option>
+              <option value="app-user">App User</option>
+            </select>
+          </label>
+          <label id="tenantSelectLabel" style="visibility: hidden;">Tenant:
+            <select id="roleTenantSelect" style="width: 200px;">
+              <option value="">Select Tenant...</option>
+            </select>
+          </label>
+          <label id="appSelectLabel" style="visibility: hidden;">App:
+            <select id="roleAppSelect" style="width: 200px;">
+              <option value="">Select App...</option>
+            </select>
+          </label>
+          <button type="button" id="applyRoleBtn" class="config-btn">Apply Role</button>
+        </div>
+        <div id="roleStatus" style="margin-top: 10px; font-size: 0.9em; color: #ccc;"></div>
+      </section>
+      
+      <section class="panel fullwidth">
+        <h2>SMTP Configuration Hierarchy</h2>
+        <div id="smtpTree" style="margin-bottom: 20px;">
+          <div class="tree-loading">Loading configuration tree...</div>
+        </div>
+      </section>
+      
+      <section class="panel fullwidth" id="smtpConfigEditor" style="display:none">
+        <h2 id="configEditorTitle">Configuration Editor</h2>
+        <div class="config-actions" style="margin-bottom: 15px;">
+          <button type="button" id="addGlobalBtn" class="config-btn">Add Global Config</button>
+          <button type="button" id="addTenantBtn" class="config-btn" style="display:none">Add Tenant Config</button>
+          <button type="button" id="addAppBtn" class="config-btn" style="display:none">Add App Config</button>
+          <button type="button" id="cancelEditBtn" class="config-btn config-btn-secondary">Cancel</button>
+        </div>
+        <h2>Manage Configurations</h2>
+        
+        <form id="smtpConfigForm">
+          <input type="hidden" name="scope" id="configScope" />
+          <input type="hidden" name="tenantId" id="configTenantId" />
+          <input type="hidden" name="appId" id="configAppId" />
+          
+          <fieldset>
+            <legend>Service Configuration</legend>
+            <div class="grid">
+              <label>Service Type
+                <select name="service" id="serviceSelect">
+                  <option value="smtp">SMTP</option>
+                  <option value="ses">Amazon SES</option>
+                </select>
+              </label>
+            </div>
+            
+            <!-- SMTP-specific fields -->
+            <div id="smtpFields">
+              <div class="grid">
+                <label>Host <input name="host" placeholder="smtp.example.com" /></label>
+                <label>Port <input name="port" type="number" value="587" /></label>
+                <label>
+                  <input name="secure" type="checkbox" /> Use TLS/SSL
+                </label>
+              </div>
+              <div class="grid">
+                <label>Username <input name="user" placeholder="Optional" /></label>
+                <label>Password <input name="pass" type="password" placeholder="Optional" /></label>
+              </div>
+            </div>
+            
+            <!-- SES-specific fields -->
+            <div id="sesFields" style="display:none">
+              <div class="grid">
+                <label>AWS Region <input name="awsRegion" placeholder="us-east-1" /></label>
+                <label>AWS Access Key <input name="awsAccessKey" placeholder="AKIA..." /></label>
+                <label>AWS Secret Key <input name="awsSecretKey" type="password" placeholder="Secret key" /></label>
+              </div>
+            </div>
+            
+            <!-- Common fields for both services -->
+            <div class="grid">
+              <label>From Address <input name="fromAddress" type="email" placeholder="noreply@example.com" /></label>
+              <label>From Name <input name="fromName" placeholder="Mail Service" /></label>
+            </div>
+          </fieldset>
+          
+          <div class="config-form-actions" style="margin-top: 15px;">
+            <button type="submit" id="saveConfigBtn">Save Configuration</button>
+            <button type="button" id="deleteConfigBtn" class="config-btn config-btn-danger" style="display:none">Delete</button>
+            <button type="button" id="testConfigBtn" class="config-btn config-btn-secondary">Test Configuration</button>
+          </div>
+          
+          <div class="status" id="smtpConfigStatus"></div>
+        </form>
+      </section>
+    </main>
   </div>
   <div id="loginOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000">
     <div style="background:#1e1e1e;padding:24px;max-width:480px;width:100%;border:1px solid #444;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);">
@@ -147,7 +248,6 @@
     </div>
   </div>
   <!-- Use compiled JS under /ui/ (dist build places main.js there). -->
-  <script src="/ui/config.js"></script>
   <script type="module" src="/ui/main.js"></script>
 </body>
 </html>

@@ -19,7 +19,9 @@ async function main() {
     app.log.info({ env: config.env, disableAuth: flags.disableAuth, issuer: config.auth.issuer, audience: config.auth.audience, jwks: config.auth.jwksUri }, 'auth startup config');
   } catch {}
   app.log.info(`mail-service listening on ${config.port}`);
-  app.log.info({ dbUrlPreview: dbUrl.replace(/:[^:@/]+@/, ':***@') }, 'database URL evaluated for scheduler');
+    const dbUrlForLog = dbUrlRaw.replace(/:[^:@/]+@/, ':***@');
+  app.log.info({ dbUrlPreview: dbUrlForLog }, 'database URL evaluated for scheduler');
+  app.log.info({ rawDbUrl: process.env.DATABASE_URL?.substring(0, 20) + '...' }, 'process.env.DATABASE_URL check');
   let dbReady = false;
   if (dbValid && !isPrismaDisabled()) {
     try {

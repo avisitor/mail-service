@@ -19,6 +19,7 @@ model Tenant {
   templates Template[]
   groups    MessageGroup[]
   suppressions Suppression[]
+  smtpConfigs SmtpConfig[]
 }
 
 model App {
@@ -29,6 +30,7 @@ model App {
   clientId  String   @unique
   createdAt DateTime @default(now())
   groups    MessageGroup[]
+  smtpConfigs SmtpConfig[]
 }
 
 model Template {
@@ -130,25 +132,42 @@ model Suppression {
   @@index([tenantId, email])
 }
 
-// Application-owned authorization: role bindings that map a user (by subject)
-// to a role within an optional scope. scopeType + scopeId define where the
-// role applies. For global roles (e.g. superadmin) use scopeType = GLOBAL and
-// scopeId = null. For tenant-scoped roles use TENANT + tenantId in scopeId.
-// For app-scoped roles use APP + appId in scopeId.
-enum ScopeType {
-  GLOBAL
-  TENANT
-  APP
+enum SmtpConfigScope { 
+  GLOBAL 
+  TENANT 
+  APP 
 }
 
-model RoleBinding {
-  id        String    @id @default(cuid())
-  userSub   String
-  scopeType ScopeType
-  scopeId   String?   // nullable for GLOBAL
-  role      String    // e.g. superadmin | tenant_admin | editor
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  @@index([userSub, scopeType, scopeId])
-  @@index([scopeType, scopeId])
+model SmtpConfig {
+  id          String         @id @default(cuid())
+  scope       SmtpConfigScope
+  tenantId    String?        // null for GLOBAL scope
+  appId       String?        // null for GLOBAL/TENANT scope
+  tenant      Tenant?        @relation(fields: [tenantId], references: [id])
+  app         App?           @relation(fields: [appId], references: [id])
+  
+  // SMTP settings
+  host        String
+  port        Int            @default(587)
+  secure      Boolean        @default(false)
+  user        String?
+  pass        String?        // encrypted in implementation
+  fromAddress String?
+  fromName    String?
+  
+  // Service selection (for future SES support)
+  service     String         @default("smtp") // smtp|ses
+  
+  // SES-specific settings (future use)
+  awsRegion   String?
+  awsAccessKey String?       // encrypted in implementation  
+  awsSecretKey String?       // encrypted in implementation
+  
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  createdBy   String?        // user sub who created this config
+  
+  @@unique([scope, tenantId, appId])
+  @@index([scope, tenantId, appId])
 }

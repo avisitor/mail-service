@@ -11,13 +11,13 @@ import { registerHealthRoutes } from './routes/health.js';
 import authPlugin from './auth/plugin.js';
 import { registerTemplateRoutes } from './modules/templates/routes.js';
 import { registerGroupRoutes } from './modules/groups/routes.js';
+import { registerSmtpRoutes } from './modules/smtp/routes.js';
 import { workerTick } from './modules/groups/service.js';
 import { registerTenantRoutes } from './modules/tenants/routes.js';
 import { registerAppRoutes } from './modules/apps/routes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
-import { resolveRoles } from './auth/roleResolver.js';
 
 export function buildApp() {
   // Optional pretty logging in development if pino-pretty is installed; fall back silently if not.
@@ -55,12 +55,13 @@ export function buildApp() {
   registerHealthRoutes(app);
   registerTemplateRoutes(app);
   registerGroupRoutes(app);
+  registerSmtpRoutes(app);
   registerTenantRoutes(app);
   registerAppRoutes(app);
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
-  let uc = req.userContext || null;
+    const uc = req.userContext || null;
     if (!uc) return null;
     try {
       const prismaModule = await import('./db/prisma.js');
@@ -77,11 +78,6 @@ export function buildApp() {
       }
       // Prefer explicit clientId from token if present, else DB value
   const clientId = tokenAny.clientId || appRec?.clientId || null;
-  // Re-derive roles (ensures updates after initial token verification)
-  try {
-    const freshRoles = await resolveRoles({ userSub: uc.sub, tenantId: uc.tenantId, appId: uc.appId });
-    uc = { ...uc, roles: freshRoles as any };
-  } catch {}
   return { ...uc, tenantName: tenant?.name || null, appName: appRec?.name || null, appClientId: clientId };
     } catch {
       return uc;
@@ -222,10 +218,10 @@ export function buildApp() {
   });
   // Simple test email endpoint (auth optional depending on flags)
   app.post('/test-email', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
-    const { to, subject, html, text } = (req.body as any) || {};
+    const { to, subject, html, text, tenantId, appId } = (req.body as any) || {};
     if (!to || !subject || (!html && !text)) return reply.badRequest('to, subject and html or text required');
     try {
-      await sendEmail({ to, subject, html, text });
+      await sendEmail({ to, subject, html, text, tenantId, appId });
       return { ok: true };
     } catch (e: any) {
       return reply.internalServerError(e.message);
@@ -233,23 +229,24 @@ export function buildApp() {
   });
 
   // Convenience bulk send (unauthenticated if auth disabled): create an ad-hoc group and immediately process via worker.
-  // Payload: { tenantId, appId, templateId?, subject, html?, text?, recipients: [ { email, name?, context? } ] }
+  // Payload: { appId, templateId?, subject, html?, text?, recipients: [ { email, name?, context? } ] }
   app.post('/send-now', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const body = (req.body as any) || {};
-    const { tenantId, appId, templateId, subject, html, text, recipients } = body;
-    if (!tenantId || !appId || !subject || !Array.isArray(recipients) || recipients.length === 0) {
-      return reply.badRequest('tenantId, appId, subject, recipients required');
+    const { appId, templateId, subject, html, text, recipients } = body;
+    if (!appId || !subject || !Array.isArray(recipients) || recipients.length === 0) {
+      return reply.badRequest('appId, subject, recipients required');
     }
     try {
       const prismaModule = await import('./db/prisma.js');
       const prisma = prismaModule.getPrisma();
       // Resolve app: accept either actual app id or clientId passed in appId field for convenience
-      let appRecord = await prisma.app.findUnique({ where: { id: appId } });
+      let appRecord = await prisma.app.findUnique({ where: { id: appId }, include: { tenant: true } });
       if (!appRecord) {
-        appRecord = await prisma.app.findUnique({ where: { clientId: appId } });
+        appRecord = await prisma.app.findUnique({ where: { clientId: appId }, include: { tenant: true } });
       }
       if (!appRecord) return reply.badRequest('App not found (provide app id or clientId)');
-      if (appRecord.tenantId !== tenantId) return reply.badRequest('App does not belong to tenant');
+      
+      const tenantId = appRecord.tenantId;
       const group = await prisma.messageGroup.create({ data: { tenantId, appId: appRecord.id, templateId, subject, status: 'scheduled', scheduledAt: new Date(), bodyOverrideHtml: html, bodyOverrideText: text } });
       await prisma.recipient.createMany({ data: recipients.map((r: any) => ({ groupId: group.id, email: r.email, name: r.name, context: r.context || {} })) });
       await prisma.messageGroup.update({ where: { id: group.id }, data: { totalRecipients: recipients.length } });

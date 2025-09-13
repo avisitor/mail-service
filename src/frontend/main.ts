@@ -13,6 +13,7 @@ const state = {
   currentTemplate: undefined as TemplateRecord|undefined,
   tenants: [] as Tenant[],
   apps: [] as AppRec[],
+  smtpConfigs: [] as SmtpConfig[],
   dbMode: true,
   user: null as any,
 };
@@ -217,6 +218,17 @@ async function loadApps() {
   } catch {/* ignore */}
 }
 
+async function loadAllApps() {
+  try {
+    console.log('Loading all apps for SMTP config...');
+    const list: AppRec[] = await api('/apps');
+    state.apps = list;
+    console.log('Loaded apps:', list);
+  } catch (e) {
+    console.error('Failed to load all apps:', e);
+  }
+}
+
 function showLogin() {
   const overlay = document.getElementById('loginOverlay')!;
   overlay.style.display = 'flex';
@@ -377,8 +389,16 @@ function composeHeaderTitle() {
 function showView(view: string) {
   (document.getElementById('view-tenants')!).style.display = view==='tenants' ? 'grid':'none';
   (document.getElementById('view-compose')!).style.display = view==='compose' ? 'grid':'none';
+  (document.getElementById('view-smtp-config')!).style.display = view==='smtp-config' ? 'block':'none';
   document.querySelectorAll('.navBtn').forEach(el=> el.classList.toggle('active', (el as HTMLElement).getAttribute('data-view')===view));
-  (document.getElementById('viewTitle')!).textContent = view==='tenants' ? 'Tenant Management' : composeHeaderTitle();
+  const title = view==='tenants' ? 'Tenant Management' : view==='smtp-config' ? 'SMTP Configuration' : composeHeaderTitle();
+  (document.getElementById('viewTitle')!).textContent = title;
+  
+  // When SMTP config view is shown, build the tree
+  if (view === 'smtp-config') {
+    console.log('SMTP Config view shown, building tree...');
+    buildSmtpTree();
+  }
 }
 
 function wireNav() {
@@ -403,7 +423,7 @@ document.getElementById('quickSendForm')?.addEventListener('submit', async (e) =
   const recipients = (fd.get('qsRecipients') as string || '').split(/\n+/).map(s=>s.trim()).filter(Boolean).map(e=>({ email: e }));
   if (!recipients.length) { status(document.getElementById('quickSendStatus') as HTMLElement, 'Recipients required'); return; }
   const btn = (e.target as HTMLFormElement).querySelector('button[type=submit]') as HTMLButtonElement; btn.disabled = true;
-  try { await api('/send-now', { method:'POST', body: JSON.stringify({ tenantId, appId, subject, html, text, recipients }) }); status(document.getElementById('quickSendStatus') as HTMLElement, 'Queued ✔'); await listGroups(); }
+  try { await api('/send-now', { method:'POST', body: JSON.stringify({ appId, subject, html, text, recipients }) }); status(document.getElementById('quickSendStatus') as HTMLElement, 'Queued ✔'); await listGroups(); }
   catch (err:any) { status(document.getElementById('quickSendStatus') as HTMLElement, 'Error: '+err.message); }
   finally { btn.disabled = false; }
 });
@@ -456,8 +476,20 @@ async function init() {
   }
 
   // load user context if auth enabled (ignore errors if auth disabled)
-  try { state.user = await api('/me'); } catch (e:any) { try { console.debug('[ui-auth] /me failed', e?.message||e); } catch {}; state.user = null; }
-  if (!state.user) {
+  let authDisabled = false;
+  try { 
+    state.user = await api('/me'); 
+    // If /me returns null but succeeds, auth is disabled
+    if (state.user === null) {
+      authDisabled = true;
+      console.debug('[ui-auth] Authentication disabled, proceeding without user context');
+    }
+  } catch (e:any) { 
+    try { console.debug('[ui-auth] /me failed', e?.message||e); } catch {}; 
+    state.user = null; 
+  }
+  
+  if (!state.user && !authDisabled) {
     // If an IDP login URL is configured, redirect to it with a returnUrl
     const idp = uiConfig.idpLoginUrl as string | null;
     if (idp) {
@@ -525,9 +557,14 @@ async function init() {
     // editors should not see Manage Tenants button
     document.getElementById('goToTenantsBtn')?.remove();
   }
-  // Only superadmins can list all tenants; avoid 403 noise for others
-  if (roleList.includes('superadmin')) { await loadTenants(); }
-  if (tenantId) await loadApps();
+  // Load tenants if superadmin or if auth is disabled (for SMTP config to work)
+  if (roleList.includes('superadmin') || authDisabled) { await loadTenants(); }
+  // Load apps if we have a tenantId or if auth is disabled
+  if (tenantId) {
+    await loadApps(); // Load apps for specific tenant
+  } else if (authDisabled) {
+    await loadAllApps(); // Load all apps for SMTP config dropdowns
+  }
   // If appId from token is present, prefer it for initial context
   if (state.user?.appId && (!appId || appId !== state.user.appId)) {
     appId = state.user.appId; try { localStorage.setItem('appId', appId); } catch {}
@@ -536,6 +573,708 @@ async function init() {
   if (tenantId) await listTemplates();
   if (tenantId) await listGroups();
   wireNav();
+  setupSmtpConfig();
 }
+
+// ============= SMTP Configuration =============
+
+interface SmtpConfig {
+  id: string;
+  scope: 'GLOBAL' | 'TENANT' | 'APP';
+  tenantId?: string;
+  appId?: string;
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  user?: string;
+  pass?: string;
+  fromAddress?: string;
+  fromName?: string;
+  sesAccessKeyId?: string;
+  sesSecretAccessKey?: string;
+  sesRegion?: string;
+  service?: 'smtp' | 'ses';
+  provider?: 'smtp' | 'ses'; // for backwards compatibility
+  isActive?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  tenantName?: string;
+  appName?: string;
+  // Legacy field names for backwards compatibility
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpFromAddress?: string;
+  smtpFromName?: string;
+}
+
+let currentSmtpConfig: SmtpConfig | null = null;
+let selectedTreeNode: {scope: string, tenantId?: string, appId?: string} | null = null;
+
+function setupSmtpConfig() {
+  console.log('Setting up SMTP configuration tree UI');
+  
+  // Configuration form
+  const configForm = document.getElementById('smtpConfigForm') as HTMLFormElement;
+  configForm?.addEventListener('submit', handleConfigSubmit);
+
+  // Service selector change handler
+  const serviceSelect = configForm?.querySelector('select[name="service"]') as HTMLSelectElement;
+  serviceSelect?.addEventListener('change', handleServiceChange);
+
+  // Initialize the tree
+  buildSmtpTree();
+}
+
+async function buildSmtpTree() {
+  const treeContainer = document.getElementById('smtpTree');
+  if (!treeContainer) {
+    console.error('smtpTree element not found in DOM');
+    return;
+  }
+
+  console.log('Building SMTP tree...');
+  console.log('State tenants:', state.tenants);
+  console.log('State apps:', state.apps);
+  console.log('State smtpConfigs:', state.smtpConfigs);
+  
+  treeContainer.innerHTML = '<div class="tree-loading">Loading configuration tree...</div>';
+
+  try {
+    // Load all configs
+    await loadSmtpConfigs();
+    
+    // Get all configs grouped by scope
+    const globalConfigs = state.smtpConfigs.filter(c => c.scope === 'GLOBAL');
+    const tenantConfigs = state.smtpConfigs.filter(c => c.scope === 'TENANT');
+    const appConfigs = state.smtpConfigs.filter(c => c.scope === 'APP');
+
+    let treeHtml = '';
+
+    // Global level
+    const globalConfig = globalConfigs[0] || null;
+    treeHtml += `
+      <div class="tree-node ${globalConfig ? 'has-config' : 'no-config'} ${selectedTreeNode?.scope === 'GLOBAL' ? 'selected' : ''}" 
+           onclick="selectTreeNode('GLOBAL')">
+        <div class="tree-node-title">Global Configuration</div>
+        <div class="tree-node-subtitle">System-wide default SMTP settings</div>
+        ${globalConfig ? `<div class="tree-node-config">Provider: ${globalConfig.provider || 'Custom'}</div>` : '<div class="tree-node-config">No configuration</div>'}
+      </div>
+    `;
+
+    // Tenant level
+    if (state.tenants && state.tenants.length > 0) {
+      treeHtml += '<div class="tree-level tree-level-1">';
+      
+      for (const tenant of state.tenants) {
+        const tenantConfig = tenantConfigs.find(c => c.tenantId === tenant.id);
+        const tenantApps = state.apps.filter(app => app.tenantId === tenant.id);
+        
+        treeHtml += `
+          <div class="tree-node ${tenantConfig ? 'has-config' : 'no-config'} ${selectedTreeNode?.scope === 'TENANT' && selectedTreeNode.tenantId === tenant.id ? 'selected' : ''}" 
+               onclick="selectTreeNode('TENANT', '${tenant.id}')">
+            <div class="tree-node-title">${tenant.name}</div>
+            <div class="tree-node-subtitle">Tenant-specific SMTP settings</div>
+            ${tenantConfig ? `<div class="tree-node-config">Provider: ${tenantConfig.provider || 'Custom'}</div>` : '<div class="tree-node-config">No configuration</div>'}
+          </div>
+        `;
+
+        // App level for this tenant
+        if (tenantApps.length > 0) {
+          treeHtml += '<div class="tree-level tree-level-2">';
+          
+          for (const app of tenantApps) {
+            const appConfig = appConfigs.find(c => c.appId === app.id);
+            
+            treeHtml += `
+              <div class="tree-node ${appConfig ? 'has-config' : 'no-config'} ${selectedTreeNode?.scope === 'APP' && selectedTreeNode.appId === app.id ? 'selected' : ''}" 
+                   onclick="selectTreeNode('APP', '${app.tenantId}', '${app.id}')">
+                <div class="tree-node-title">${app.name}</div>
+                <div class="tree-node-subtitle">App-specific SMTP settings</div>
+                ${appConfig ? `<div class="tree-node-config">Provider: ${appConfig.provider || 'Custom'}</div>` : '<div class="tree-node-config">No configuration</div>'}
+              </div>
+            `;
+          }
+          
+          treeHtml += '</div>';
+        }
+      }
+      
+      treeHtml += '</div>';
+    }
+
+    treeContainer.innerHTML = treeHtml;
+    
+    // Select the first node if nothing is selected
+    if (!selectedTreeNode) {
+      selectTreeNode('GLOBAL');
+    }
+
+  } catch (error) {
+    console.error('Failed to build SMTP tree:', error);
+    treeContainer.innerHTML = '<div class="tree-loading">Failed to load configuration tree</div>';
+  }
+}
+
+function selectTreeNode(scope: string, tenantId?: string, appId?: string) {
+  console.log('Selecting tree node:', scope, tenantId, appId);
+  
+  selectedTreeNode = { scope, tenantId, appId };
+  
+  // Update visual selection
+  document.querySelectorAll('.tree-node').forEach(node => {
+    node.classList.remove('selected');
+  });
+  
+  // Find and select the clicked node
+  const clickedElement = (event?.target as HTMLElement)?.closest('.tree-node');
+  if (clickedElement) {
+    clickedElement.classList.add('selected');
+  }
+  
+  // Update hidden form fields
+  const formScope = document.getElementById('formScope') as HTMLInputElement;
+  const formTenantId = document.getElementById('formTenantId') as HTMLInputElement;
+  const formAppId = document.getElementById('formAppId') as HTMLInputElement;
+  
+  if (formScope) formScope.value = scope;
+  if (formTenantId) formTenantId.value = tenantId || '';
+  if (formAppId) formAppId.value = appId || '';
+  
+  // Load configuration for this node
+  loadConfigForNode();
+  
+  // Update action buttons
+  updateActionButtons();
+}
+
+function loadConfigForNode() {
+  if (!selectedTreeNode) return;
+  
+  // Find existing config for this node
+  const config = state.smtpConfigs.find((c: SmtpConfig) => {
+    if (c.scope !== selectedTreeNode!.scope) return false;
+    if (selectedTreeNode!.scope === 'TENANT') return c.tenantId === selectedTreeNode!.tenantId;
+    if (selectedTreeNode!.scope === 'APP') return c.appId === selectedTreeNode!.appId;
+    return c.scope === 'GLOBAL';
+  });
+  
+  currentSmtpConfig = config || null;
+  
+  if (config) {
+    populateForm(config);
+    showConfigEditor();
+  } else {
+    clearForm();
+    showConfigEditor();
+  }
+}
+
+function updateActionButtons() {
+  const actionButtons = document.getElementById('configActionButtons');
+  if (!actionButtons || !selectedTreeNode) return;
+  
+  const hasConfig = currentSmtpConfig !== null;
+  const scope = selectedTreeNode.scope;
+  const scopeLabel = scope === 'GLOBAL' ? 'Global' : 
+                   scope === 'TENANT' ? 'Tenant' : 'App';
+  
+  actionButtons.innerHTML = `
+    ${hasConfig ? `
+      <button type="submit" class="config-btn">Update ${scopeLabel} Config</button>
+      <button type="button" class="config-btn config-btn-danger" onclick="deleteSmtpConfig()">Delete Config</button>
+    ` : `
+      <button type="submit" class="config-btn">Create ${scopeLabel} Config</button>
+    `}
+    <button type="button" class="config-btn config-btn-secondary" onclick="refreshSmtpTree()">Refresh</button>
+  `;
+}
+
+function showConfigEditor() {
+  const editor = document.getElementById('smtpConfigEditor');
+  if (editor) editor.style.display = 'block';
+}
+
+function refreshSmtpTree() {
+  buildSmtpTree();
+}
+
+async function deleteSmtpConfig() {
+  if (!currentSmtpConfig) {
+    alert('No configuration selected to delete');
+    return;
+  }
+  
+  if (!confirm('Are you sure you want to delete this SMTP configuration?')) return;
+  
+  try {
+    await api(`/smtp-configs/${currentSmtpConfig.id}`, { method: 'DELETE' });
+    await loadSmtpConfigs();
+    currentSmtpConfig = null;
+    clearForm();
+    buildSmtpTree(); // Refresh the tree
+  } catch (error: any) {
+    console.error('Failed to delete config:', error);
+    alert('Failed to delete configuration: ' + error.message);
+  }
+}
+
+// Make functions globally available
+(window as any).selectTreeNode = selectTreeNode;
+(window as any).deleteSmtpConfig = deleteSmtpConfig;
+(window as any).refreshSmtpTree = refreshSmtpTree;
+
+function populateFormAppSelect(selectedTenantId: string) {
+  console.log('populateFormAppSelect called with tenantId:', selectedTenantId);
+  console.log('state.apps:', state.apps);
+  
+  const formAppSelect = document.getElementById('formAppSelect') as HTMLSelectElement;
+  if (!formAppSelect) {
+    console.log('formAppSelect element not found');
+    return;
+  }
+  
+  formAppSelect.innerHTML = '<option value="">Select App</option>';
+  
+  if (selectedTenantId && state.apps) {
+    const tenantApps = state.apps.filter(app => app.tenantId === selectedTenantId);
+    console.log('Filtered apps for tenant:', tenantApps);
+    
+    tenantApps.forEach(app => {
+      const option = document.createElement('option');
+      option.value = app.id;
+      option.textContent = app.name;
+      formAppSelect.appendChild(option);
+      console.log('Added app option:', app.name);
+    });
+  } else {
+    console.log('No selectedTenantId or state.apps is empty/null');
+  }
+}
+
+function handleScopeChange() {
+  // Legacy function - no longer needed with tree-based UI
+  // This function is kept for compatibility but does nothing
+  console.log('handleScopeChange called (legacy function - tree UI is used instead)');
+  return;
+}
+
+function handleTenantChange() {
+  const selectedTenantId = (document.getElementById('smtpTenantSelect') as HTMLSelectElement).value;
+  const appSelect = document.getElementById('smtpAppSelect') as HTMLSelectElement;
+  const scope = (document.getElementById('smtpScope') as HTMLSelectElement).value;
+  
+  if (scope === 'APP' && selectedTenantId && appSelect) {
+    // Load apps for selected tenant
+    const tenantApps = state.apps.filter(app => app.tenantId === selectedTenantId);
+    appSelect.innerHTML = '<option value="">Select App</option>' + 
+      tenantApps.map(app => `<option value="${app.id}">${app.name}</option>`).join('');
+    
+    // Auto-select current app if available
+    if (appId && tenantApps.some(app => app.id === appId)) {
+      appSelect.value = appId;
+    }
+  }
+}
+
+function handleServiceChange() {
+  const service = (document.querySelector('select[name="service"]') as HTMLSelectElement)?.value;
+  const sesSettings = document.getElementById('sesSettings') as HTMLElement;
+  
+  if (sesSettings) {
+    sesSettings.style.display = service === 'ses' ? 'block' : 'none';
+  }
+}
+
+function populateFormSelects() {
+  // Populate tenant selects
+  const tenantSelects = [
+    document.getElementById('smtpTenantSelect'),
+    document.getElementById('formTenantSelect')
+  ] as HTMLSelectElement[];
+  
+  tenantSelects.forEach(select => {
+    if (select) {
+      select.innerHTML = '<option value="">Select Tenant</option>' + 
+        (state.tenants || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+      
+      // Auto-select current tenant if available
+      if (tenantId && (state.tenants || []).some(t => t.id === tenantId)) {
+        select.value = tenantId;
+      }
+    }
+  });
+  
+  // Populate app selects
+  const appSelects = [
+    document.getElementById('smtpAppSelect'),
+    document.getElementById('formAppSelect')
+  ] as HTMLSelectElement[];
+  
+  appSelects.forEach(select => {
+    if (select) {
+      select.innerHTML = '<option value="">Select App</option>';
+      if (tenantId) {
+        const tenantApps = (state.apps || []).filter(app => app.tenantId === tenantId);
+        select.innerHTML += tenantApps.map(app => `<option value="${app.id}">${app.name}</option>`).join('');
+        
+        // Auto-select current app if available
+        if (appId && tenantApps.some(app => app.id === appId)) {
+          select.value = appId;
+        }
+      }
+    }
+  });
+}
+
+async function updateEffectiveConfigDisplay() {
+  const effectiveConfigDiv = document.getElementById('effectiveConfig') as HTMLElement;
+  const statusDiv = document.getElementById('smtpContextStatus') as HTMLElement;
+  const refreshBtn = document.getElementById('refreshConfigBtn') as HTMLButtonElement;
+  
+  if (!effectiveConfigDiv) return;
+  
+  const scope = (document.getElementById('smtpScope') as HTMLSelectElement).value;
+  const tenantId = (document.getElementById('smtpTenantSelect') as HTMLSelectElement).value;
+  const appId = (document.getElementById('smtpAppSelect') as HTMLSelectElement).value;
+  
+  if (!scope) {
+    effectiveConfigDiv.innerHTML = '<p class="sub">Select a scope to view effective configuration...</p>';
+    statusDiv.innerHTML = '';
+    refreshBtn.style.display = 'none';
+    return;
+  }
+
+  // Check if required selections are made
+  if (scope === 'TENANT' && !tenantId) {
+    effectiveConfigDiv.innerHTML = '<p class="sub">Please select a tenant to view configuration...</p>';
+    statusDiv.innerHTML = '';
+    refreshBtn.style.display = 'none';
+    return;
+  }
+  
+  if (scope === 'APP' && (!tenantId || !appId)) {
+    effectiveConfigDiv.innerHTML = '<p class="sub">Please select both tenant and app to view configuration...</p>';
+    statusDiv.innerHTML = '';
+    refreshBtn.style.display = 'none';
+    return;
+  }
+  
+  try {
+    let url = '/smtp-configs/effective?scope=' + scope;
+    if (scope !== 'GLOBAL' && tenantId) {
+      url += '&tenantId=' + tenantId;
+    }
+    if (scope === 'APP' && appId) {
+      url += '&appId=' + appId;
+    }
+    
+    const response = await api(url);
+    const config = response;
+    
+    if (config) {
+      effectiveConfigDiv.innerHTML = `
+        <div class="code" style="font-size:0.85rem">
+          <div><strong>Scope:</strong> ${config.scope}</div>
+          ${config.tenantId ? `<div><strong>Tenant:</strong> ${config.tenantId}</div>` : ''}
+          ${config.appId ? `<div><strong>App:</strong> ${config.appId}</div>` : ''}
+          <div><strong>Provider:</strong> ${config.provider || 'smtp'}</div>
+          <div><strong>Host:</strong> ${config.host || 'Not configured'}</div>
+          <div><strong>Port:</strong> ${config.port || 'Not configured'}</div>
+          <div><strong>From:</strong> ${config.fromAddress || 'Not configured'}</div>
+          <div><strong>Created:</strong> ${new Date(config.createdAt).toLocaleString()}</div>
+        </div>
+      `;
+      statusDiv.innerHTML = '';
+    } else {
+      effectiveConfigDiv.innerHTML = '<p class="sub">No configuration found for this scope.</p>';
+      statusDiv.innerHTML = '';
+    }
+    
+    refreshBtn.style.display = 'block';
+  } catch (error: any) {
+    effectiveConfigDiv.innerHTML = '<p class="sub error">Error loading configuration</p>';
+    statusDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+    refreshBtn.style.display = 'none';
+  }
+}
+
+function handleProviderChange() {
+  const provider = (document.querySelector('input[name="provider"]:checked') as HTMLInputElement)?.value;
+  const smtpFieldset = document.getElementById('smtp-fieldset') as HTMLFieldSetElement;
+  const sesFieldset = document.getElementById('ses-fieldset') as HTMLFieldSetElement;
+  
+  smtpFieldset.style.display = provider === 'smtp' ? 'block' : 'none';
+  sesFieldset.style.display = provider === 'ses' ? 'block' : 'none';
+}
+
+async function handleConfigSubmit(e: Event) {
+  e.preventDefault();
+  const form = e.target as HTMLFormElement;
+  const formData = new FormData(form);
+  const statusEl = document.getElementById('smtpConfigStatus') as HTMLElement;
+  
+  const config: any = {
+    scope: formData.get('scope'),
+    service: formData.get('service'),
+  };
+  
+  // Add tenant/app based on scope
+  if (config.scope !== 'GLOBAL') {
+    config.tenantId = formData.get('tenantId');
+  }
+  if (config.scope === 'APP') {
+    config.appId = formData.get('appId');
+  }
+  
+  // Add service-specific fields
+  if (config.service === 'smtp' || !config.service) {
+    config.host = formData.get('host');
+    config.port = parseInt(formData.get('port') as string) || 587;
+    config.secure = formData.has('secure');
+    config.user = formData.get('user');
+    config.pass = formData.get('pass');
+    config.fromAddress = formData.get('fromAddress');
+    config.fromName = formData.get('fromName');
+  } else if (config.service === 'ses') {
+    config.sesAccessKeyId = formData.get('sesAccessKeyId');
+    config.sesSecretAccessKey = formData.get('sesSecretAccessKey');
+    config.sesRegion = formData.get('sesRegion');
+    config.fromAddress = formData.get('fromAddress');
+    config.fromName = formData.get('fromName');
+  }
+  
+  const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+  submitBtn.disabled = true;
+  
+  try {
+    if (currentSmtpConfig) {
+      // Update existing config
+      await api(`/smtp-configs/${currentSmtpConfig.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(config)
+      });
+      showStatus(statusEl, 'Configuration updated successfully', 'success');
+    } else {
+      // Create new config
+      await api('/smtp-configs', {
+        method: 'POST',
+        body: JSON.stringify(config)
+      });
+      showStatus(statusEl, 'Configuration created successfully', 'success');
+    }
+    
+    await loadSmtpConfigs();
+    clearForm();
+  } catch (error: any) {
+    showStatus(statusEl, `Error: ${error.message}`, 'error');
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+async function handleConfigDelete() {
+  if (!currentSmtpConfig) return;
+  
+  if (!confirm('Are you sure you want to delete this SMTP configuration?')) return;
+  
+  const statusEl = document.getElementById('config-status') as HTMLElement;
+  const deleteBtn = document.getElementById('delete-config-btn') as HTMLButtonElement;
+  deleteBtn.disabled = true;
+  
+  try {
+    await api(`/smtp-configs/${currentSmtpConfig.id}`, { method: 'DELETE' });
+    showStatus(statusEl, 'Configuration deleted successfully', 'success');
+    await loadSmtpConfigs();
+    clearForm();
+  } catch (error: any) {
+    showStatus(statusEl, `Error: ${error.message}`, 'error');
+  } finally {
+    deleteBtn.disabled = false;
+  }
+}
+
+async function handleTestConnection() {
+  const statusEl = document.getElementById('config-status') as HTMLElement;
+  const testBtn = document.getElementById('test-connection-btn') as HTMLButtonElement;
+  testBtn.disabled = true;
+  
+  try {
+    const scope = (document.getElementById('smtp-scope') as HTMLSelectElement).value;
+    const tenantId = scope !== 'GLOBAL' ? (document.getElementById('smtp-tenant-id') as HTMLSelectElement).value : undefined;
+    const appId = scope === 'APP' ? (document.getElementById('smtp-app-id') as HTMLSelectElement).value : undefined;
+    
+    await api('/smtp-configs/test', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId, appId })
+    });
+    
+    showStatus(statusEl, 'Connection test successful', 'success');
+  } catch (error: any) {
+    showStatus(statusEl, `Connection test failed: ${error.message}`, 'error');
+  } finally {
+    testBtn.disabled = false;
+  }
+}
+
+async function loadSmtpConfigs() {
+  try {
+    const configs = await api('/smtp-configs');
+    state.smtpConfigs = configs; // Store in state for tree building
+    displayConfigList(configs);
+  } catch (error: any) {
+    console.error('Failed to load SMTP configs:', error);
+    state.smtpConfigs = []; // Clear on error
+  }
+}
+
+function displayConfigList(configs: SmtpConfig[]) {
+  // No longer needed - using tree-based UI instead
+  console.log('displayConfigList called with', configs.length, 'configs (tree UI is used instead)');
+}
+
+async function editConfig(configId: string) {
+  console.log('Edit button clicked for config:', configId);
+  try {
+    const config = await api(`/smtp-configs/${configId}`);
+    console.log('Loaded config for editing:', config);
+    currentSmtpConfig = config;
+    populateForm(config);
+  } catch (error: any) {
+    console.error('Failed to load config:', error);
+  }
+}
+
+async function deleteConfig(configId: string) {
+  if (!confirm('Are you sure you want to delete this SMTP configuration?')) return;
+  
+  try {
+    await api(`/smtp-configs/${configId}`, { method: 'DELETE' });
+    await loadSmtpConfigs();
+    if (currentSmtpConfig?.id === configId) {
+      clearForm();
+    }
+  } catch (error: any) {
+    console.error('Failed to delete config:', error);
+  }
+}
+
+function populateForm(config: SmtpConfig) {
+  // Expand the form details element so user can see the form
+  const detailsElement = document.querySelector('details') as HTMLDetailsElement;
+  if (detailsElement) {
+    detailsElement.open = true;
+  }
+
+  // Set scope and trigger change
+  const scopeSelect = document.getElementById('smtpScope') as HTMLSelectElement;
+  if (scopeSelect) {
+    scopeSelect.value = config.scope;
+    // Trigger scope change event
+    scopeSelect.dispatchEvent(new Event('change'));
+  }
+  
+  // Set tenant/app if applicable
+  if (config.tenantId) {
+    const tenantSelect = document.getElementById('formTenantSelect') as HTMLSelectElement;
+    if (tenantSelect) {
+      tenantSelect.value = config.tenantId;
+      tenantSelect.dispatchEvent(new Event('change'));
+    }
+  }
+  if (config.appId) {
+    const appSelect = document.getElementById('formAppSelect') as HTMLSelectElement;
+    if (appSelect) {
+      appSelect.value = config.appId;
+    }
+  }
+  
+  // Set provider/service
+  const serviceSelect = document.querySelector('select[name="service"]') as HTMLSelectElement;
+  if (serviceSelect) {
+    serviceSelect.value = config.service || config.provider || 'smtp';
+  }
+  
+  // Set SMTP fields using name attributes
+  const form = document.getElementById('smtpConfigForm') as HTMLFormElement;
+  if (form) {
+    (form.querySelector('input[name="host"]') as HTMLInputElement).value = config.host || config.smtpHost || '';
+    (form.querySelector('input[name="port"]') as HTMLInputElement).value = (config.port || config.smtpPort || 587).toString();
+    (form.querySelector('input[name="secure"]') as HTMLInputElement).checked = config.secure || config.smtpSecure || false;
+    (form.querySelector('input[name="user"]') as HTMLInputElement).value = config.user || config.smtpUser || '';
+    (form.querySelector('input[name="pass"]') as HTMLInputElement).value = ''; // Don't populate password for security
+    (form.querySelector('input[name="fromAddress"]') as HTMLInputElement).value = config.fromAddress || config.smtpFromAddress || '';
+    (form.querySelector('input[name="fromName"]') as HTMLInputElement).value = config.fromName || config.smtpFromName || '';
+  }
+}
+
+function clearForm() {
+  currentSmtpConfig = null;
+  const form = document.getElementById('smtpConfigForm') as HTMLFormElement;
+  if (form) {
+    form.reset();
+  }
+  const deleteBtn = document.getElementById('delete-config-btn') as HTMLButtonElement;
+  if (deleteBtn) {
+    deleteBtn.style.display = 'none';
+  }
+  // handleScopeChange(); // Removed - not needed with tree-based UI
+}
+
+async function loadEffectiveConfig() {
+  const statusEl = document.getElementById('config-status') as HTMLElement;
+  const effectiveEl = document.getElementById('effective-config') as HTMLElement;
+  
+  try {
+    const scope = (document.getElementById('smtp-scope') as HTMLSelectElement).value;
+    const tenantId = scope !== 'GLOBAL' ? (document.getElementById('smtp-tenant-id') as HTMLSelectElement).value : undefined;
+    const appId = scope === 'APP' ? (document.getElementById('smtp-app-id') as HTMLSelectElement).value : undefined;
+    
+    const config = await api('/smtp-configs/effective', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId, appId })
+    });
+    
+    if (!config) {
+      effectiveEl.innerHTML = '<div class="effective-config-item">No configuration found</div>';
+      return;
+    }
+    
+    effectiveEl.innerHTML = Object.entries(config)
+      .filter(([key, value]) => value !== null && value !== undefined && key !== 'id')
+      .map(([key, value]) => `
+        <div class="effective-config-item">
+          <span class="effective-config-key">${key}:</span>
+          <span class="effective-config-value">${key.includes('pass') || key.includes('secret') ? '***' : value}</span>
+        </div>
+      `).join('');
+    
+    showStatus(statusEl, 'Effective configuration loaded', 'info');
+  } catch (error: any) {
+    showStatus(statusEl, `Error: ${error.message}`, 'error');
+  }
+}
+
+function showStatus(element: HTMLElement | null, message: string, type: 'success' | 'error' | 'info') {
+  if (!element) {
+    console.error('showStatus called with null element, message:', message);
+    return;
+  }
+  
+  element.textContent = message;
+  element.className = `config-status ${type}`;
+  element.style.display = 'block';
+  
+  setTimeout(() => {
+    element.style.display = 'none';
+  }, 5000);
+}
+
+// Make functions available globally for onclick handlers
+(window as any).editConfig = editConfig;
+(window as any).deleteConfig = deleteConfig;
 
 init();

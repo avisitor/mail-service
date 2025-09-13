@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../../db/prisma.js';
-import { hasRole } from '../../auth/roles.js';
+import { AuthService } from '../../auth/service.js';
 import { customAlphabet } from 'nanoid';
 
 const nano = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 12);
@@ -11,9 +11,10 @@ const tenantCreateSchema = z.object({ name: z.string().min(1) });
 const tenantUpdateSchema = z.object({ name: z.string().min(1).optional(), status: z.enum(['active','disabled','deleted']).optional() });
 
 export async function registerTenantRoutes(app: FastifyInstance) {
-  app.post('/tenants', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
-    // @ts-ignore
-    if (!hasRole(req.userContext, 'superadmin')) return reply.forbidden();
+  app.post('/tenants', async (req, reply) => {
+    const userContext = await AuthService.requireRole(req, reply, 'superadmin');
+    if (!userContext) return; // Response already sent
+
     const parsed = tenantCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.badRequest(parsed.error.message);
     const prisma = getPrisma();
@@ -22,26 +23,23 @@ export async function registerTenantRoutes(app: FastifyInstance) {
     return reply.code(201).send(tenant);
   });
 
-  app.get('/tenants', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
+  app.get('/tenants', async (req, reply) => {
+    const userContext = await AuthService.requireRole(req, reply, 'superadmin');
+    if (!userContext) return; // Response already sent
+
     if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
-      try { (req as any).log?.info({ userContext: (req as any).userContext }, 'tenants.access'); } catch {}
+      try { (req as any).log?.info({ userContext: userContext }, 'tenants.access'); } catch {}
     }
-    // @ts-ignore
-    if (!hasRole(req.userContext, 'superadmin')) {
-      if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
-        // Provide a minimal diagnostic body to help debug role mismatches
-        return reply.code(403).send({ error: 'forbidden', roles: (req as any).userContext?.roles || [], user: (req as any).userContext?.sub || null });
-      }
-      return reply.forbidden();
-    }
+
     const includeDeleted = ((req.query as any)?.includeDeleted || 'false').toString().toLowerCase() === 'true';
     const prisma = getPrisma();
     return prisma.tenant.findMany({ where: includeDeleted ? undefined : { status: { not: 'deleted' } }, orderBy: { createdAt: 'desc' } });
   });
 
-  app.get('/tenants/:id', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
-    // @ts-ignore
-    if (!hasRole(req.userContext, 'superadmin')) return reply.forbidden();
+  app.get('/tenants/:id', async (req, reply) => {
+    const userContext = await AuthService.requireRole(req, reply, 'superadmin');
+    if (!userContext) return; // Response already sent
+
     const { id } = req.params as any;
     const prisma = getPrisma();
     const t = await prisma.tenant.findUnique({ where: { id } });

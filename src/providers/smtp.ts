@@ -1,18 +1,118 @@
 import nodemailer, { Transporter } from 'nodemailer';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { config } from '../config.js';
+import { resolveSmtpConfig } from '../modules/smtp/service.js';
 
 let transporter: Transporter | null = null;
+let cachedConfig: any = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-export function getTransporter(): Transporter {
-  if (!transporter) {
+export function getTransporter(tenantId?: string, appId?: string): Transporter {
+  // Use cached transporter if configuration hasn't changed
+  const now = Date.now();
+  if (transporter && cachedConfig && (now - cacheTimestamp) < CACHE_TTL) {
+    return transporter;
+  }
+
+  // For backward compatibility, if no tenant/app context, use environment config
+  if (!tenantId && !appId) {
+    if (!transporter) {
+      transporter = nodemailer.createTransport({
+        host: config.smtp.host,
+        port: config.smtp.port,
+        secure: config.smtp.secure,
+        auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
+      });
+    }
+    return transporter;
+  }
+
+  // This will be replaced with async version in the refactored sendEmail function
+  throw new Error('Dynamic SMTP configuration requires async resolution. Use sendEmailWithConfig instead.');
+}
+
+async function getTransporterAsync(tenantId?: string, appId?: string): Promise<Transporter> {
+  const now = Date.now();
+  
+  // Check if we can use cached transporter
+  if (transporter && cachedConfig && (now - cacheTimestamp) < CACHE_TTL) {
+    // Verify cache is for the same tenant/app context
+    if (cachedConfig.tenantId === tenantId && cachedConfig.appId === appId) {
+      return transporter;
+    }
+  }
+
+  // Resolve configuration from database
+  const smtpConfig = await resolveSmtpConfig(appId);
+  
+  // Create new transporter with resolved config based on service type
+  if (smtpConfig.service === 'ses') {
+    // For SES, we'll use a custom transport that leverages AWS SDK
+    // This is a simplified approach - in production you might want a more robust implementation
+    const sesClient = new SESClient({
+      region: smtpConfig.awsRegion || 'us-east-1',
+      credentials: {
+        accessKeyId: smtpConfig.awsAccessKey!,
+        secretAccessKey: smtpConfig.awsSecretKey!,
+      },
+    });
+    
+    // Create a custom transport that uses SES SDK
     transporter = nodemailer.createTransport({
-      host: config.smtp.host,
-      port: config.smtp.port,
-      secure: config.smtp.secure,
-      auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
+      name: 'ses',
+      version: '1.0.0',
+      send: async (mail: any, callback: any) => {
+        try {
+          const params = {
+            Source: mail.data.from,
+            Destination: {
+              ToAddresses: Array.isArray(mail.data.to) ? mail.data.to : [mail.data.to],
+            },
+            Message: {
+              Subject: { Data: mail.data.subject },
+              Body: {
+                Html: mail.data.html ? { Data: mail.data.html } : undefined,
+                Text: mail.data.text ? { Data: mail.data.text } : undefined,
+              },
+            },
+          };
+          
+          const command = new SendEmailCommand(params);
+          await sesClient.send(command);
+          callback(null, { messageId: 'ses-sent' });
+        } catch (error) {
+          callback(error);
+        }
+      },
+    });
+  } else {
+    // Standard SMTP transporter
+    transporter = nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      auth: smtpConfig.user ? { 
+        user: smtpConfig.user, 
+        pass: smtpConfig.pass 
+      } : undefined,
     });
   }
-  return transporter;
+
+  // Cache the config and timestamp
+  cachedConfig = {
+    tenantId,
+    appId,
+    service: smtpConfig.service,
+    host: smtpConfig.host,
+    port: smtpConfig.port,
+    secure: smtpConfig.secure,
+    user: smtpConfig.user,
+    awsRegion: smtpConfig.awsRegion,
+  };
+  cacheTimestamp = now;
+
+  return transporter!;
 }
 
 export interface SendEmailInput {
@@ -20,6 +120,9 @@ export interface SendEmailInput {
   subject: string;
   html?: string;
   text?: string;
+  // Optional context for configuration resolution
+  tenantId?: string;
+  appId?: string;
 }
 
 export async function sendEmail(input: SendEmailInput) {
@@ -34,9 +137,13 @@ export async function sendEmail(input: SendEmailInput) {
   if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
     return; // pretend success
   }
-  const t = getTransporter();
-  const fromAddr = config.smtp.fromDefault || config.smtp.user;
-  const from = config.smtp.fromName && fromAddr ? `${config.smtp.fromName} <${fromAddr}>` : fromAddr;
+
+  const t = await getTransporterAsync(input.tenantId, input.appId);
+  const smtpConfig = await resolveSmtpConfig(input.appId);
+  
+  const fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user;
+  const from = smtpConfig.fromName && fromAddr ? `${smtpConfig.fromName} <${fromAddr}>` : fromAddr;
+  
   await t.sendMail({
     from,
     to: input.to,
@@ -44,4 +151,9 @@ export async function sendEmail(input: SendEmailInput) {
     html: input.html,
     text: input.text,
   });
+}
+
+// Legacy function for backward compatibility - will be deprecated
+export async function sendEmailWithConfig(input: SendEmailInput) {
+  return sendEmail(input);
 }
