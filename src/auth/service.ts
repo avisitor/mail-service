@@ -24,7 +24,7 @@ export class AuthService {
     try {
       await (request as any).jwtVerify();
       // Extract user context from verified JWT using proper role claim extraction
-      return await extractUser(request);
+      return await extractUser((request as any).user);
     } catch (error) {
       // Authentication failed, return null without sending response
       return null;

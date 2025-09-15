@@ -11,8 +11,7 @@ export interface UserContext {
   appId?: string;
 }
 
-export async function extractUser(req: any): Promise<UserContext | null> {
-  const payload: any = req.user;
+export async function extractUser(payload: any): Promise<UserContext | null> {
   if (!payload) return null;
   const roleClaim = payload[config.auth.roleClaim];
   const roles: UserRole[] = Array.isArray(roleClaim) ? roleClaim : (typeof roleClaim === 'string' ? roleClaim.split(/[ ,]/).filter(Boolean) : []);

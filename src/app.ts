@@ -77,16 +77,39 @@ export function buildApp() {
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
-    const uc = req.userContext || null;
+    let uc = req.userContext || null;
     const tokenAny: any = (req as any).user || {};
     
     console.log('[ME-DEBUG] Raw token from IDP:', JSON.stringify(tokenAny, null, 2));
-    console.log('[ME-DEBUG] UserContext:', JSON.stringify(uc, null, 2));
+    console.log('[ME-DEBUG] UserContext from auth:', JSON.stringify(uc, null, 2));
+    
+    // If userContext is empty but we have a JWT payload, extract it directly
+    if ((!uc || Object.keys(uc).length === 0) && tokenAny) {
+      console.log('[ME-DEBUG] Extracting user context directly from JWT payload');
+      const { extractUser } = await import('./auth/roles.js');
+      uc = await extractUser(tokenAny);
+      console.log('[ME-DEBUG] Extracted UserContext:', JSON.stringify(uc, null, 2));
+    }
     
     if (!uc) return null;
     try {
       const prismaModule = await import('./db/prisma.js');
       const prisma = prismaModule.getPrisma();
+      const isSuperadmin = uc.roles && uc.roles.includes('superadmin');
+      
+      if (isSuperadmin) {
+        // Superadmins are authenticated independently - no app or tenant context needed
+        console.log('[ME-DEBUG] Superadmin detected - bypassing app/tenant lookup');
+        return { 
+          ...uc, 
+          tenantId: undefined,
+          tenantName: null, 
+          appName: null, 
+          appClientId: null 
+        };
+      }
+      
+      // For non-superadmin users, perform normal app/tenant lookup
       const [tenant, appRecInitial] = await Promise.all([
         uc.tenantId ? prisma.tenant.findUnique({ where: { id: uc.tenantId } }) : Promise.resolve(null),
         uc.appId ? prisma.app.findUnique({ where: { id: uc.appId } }) : Promise.resolve(null)
@@ -115,9 +138,10 @@ export function buildApp() {
         } catch {}
       }
       
-      // IMPORTANT: If we found an app but don't have tenantId in token, lookup tenantId from the app
+      // For non-superadmin users, resolve tenantId from app if not present in token
       let effectiveTenantId = uc.tenantId;
       let effectiveTenant = tenant;
+      
       if (appRec && !effectiveTenantId) {
         effectiveTenantId = appRec.tenantId;
         try {

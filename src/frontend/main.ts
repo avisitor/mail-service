@@ -4,7 +4,11 @@ interface TemplateRecord { id:string; tenantId:string; name:string; version:numb
 interface Tenant { id:string; name:string; status?:string; }
 interface AppRec { id:string; tenantId:string; name:string; clientId:string; }
 
-let tenantId = localStorage.getItem('tenantId') || '';
+// Check if we're returning from IDP (has token parameter)
+const url = new URL(window.location.href);
+const hasTokenFromIdp = !!url.searchParams.get('token');
+
+let tenantId = (!hasTokenFromIdp && localStorage.getItem('tenantId')) || '';
 let appId = localStorage.getItem('appId') || '';
 let authToken: string | null = localStorage.getItem('authToken');
 let uiConfig: any = (window as any).__MAIL_UI_CONFIG__ || {};
@@ -331,7 +335,8 @@ function applyRoleVisibility() {
   }
 }
 
-function onAuthenticated() {
+function onAuthenticated(cameFromIdp: boolean = false) {
+  console.log('[DEBUG] onAuthenticated called with cameFromIdp:', cameFromIdp);
   hideLogin();
   const roles = state.user?.roles || [];
   const userSummary = document.getElementById('userSummary');
@@ -358,8 +363,33 @@ function onAuthenticated() {
   }
   const loadTenantsPromise = isSuperadmin ? loadTenants().catch(()=>{}) : Promise.resolve();
   loadTenantsPromise.then(async () => {
+    // For superadmin, only load tenantId from localStorage if they specifically chose a tenant context
     // For non-superadmin, prefer tenantId from token
-    if (!isSuperadmin && state.user?.tenantId && !tenantId) {
+    if (isSuperadmin) {
+      console.log('[DEBUG] Superadmin context logic - cameFromIdp:', cameFromIdp, 'isInTenantContext:', roleContext.isInTenantContext);
+      // If returning from IDP, superadmin should start in global context (clear tenant context)
+      if (cameFromIdp) {
+        console.log('[DEBUG] Clearing tenant context for superadmin returning from IDP');
+        tenantId = '';
+        localStorage.removeItem('tenantId');
+        // Clear tenant context flags
+        roleContext.isInTenantContext = false;
+        roleContext.contextTenantId = '';
+        roleContext.contextTenantName = '';
+        localStorage.removeItem('contextTenantId');
+        localStorage.removeItem('contextTenantName');
+      } else {
+        // On normal page refresh, restore tenant context if they were in one
+        if (roleContext.isInTenantContext && roleContext.contextTenantId) {
+          tenantId = roleContext.contextTenantId;
+        }
+        // Clear any legacy tenantId from localStorage for superadmins not in tenant context
+        if (!roleContext.isInTenantContext) {
+          tenantId = '';
+          localStorage.removeItem('tenantId');
+        }
+      }
+    } else if (!isSuperadmin && state.user?.tenantId && !tenantId) {
       tenantId = state.user.tenantId;
       localStorage.setItem('tenantId', tenantId);
     }
@@ -404,7 +434,7 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
     if (!state.user) throw new Error('No user context');
     statusEl.textContent = 'OK';
     setTimeout(()=> { statusEl.textContent=''; }, 800);
-    onAuthenticated();
+    onAuthenticated(false); // Manual login form - not from IDP
   } catch (err:any) {
     statusEl.textContent = 'Invalid token';
     authToken = null; localStorage.removeItem('authToken');
@@ -901,7 +931,19 @@ function wireNav() {
       savePageState();
     })
   );
-  showView('compose');
+  
+  // Determine the appropriate default view
+  const roles: string[] = state.user?.roles || [];
+  const isSuperadmin = roles.includes('superadmin');
+  
+  let defaultView = 'compose'; // Default for tenant admins and editors
+  
+  if (isSuperadmin && !roleContext.isInTenantContext) {
+    // Superadmin in global context should see Config view
+    defaultView = 'smtp-config';
+  }
+  
+  showView(defaultView);
 }
 
 // Manage Tenants button (in compose context panel)
@@ -958,11 +1000,14 @@ async function init() {
   const tenantHint = url.searchParams.get('tenantId');
   const clientIdHint = url.searchParams.get('clientId');
   const appIdHint = url.searchParams.get('appId') || url.searchParams.get('app');
-  if (tenantHint) { try { localStorage.setItem('tenantId', tenantHint); tenantId = tenantHint; } catch {} }
+  // Only apply hints if not returning from IDP (to avoid overriding superadmin global context)
+  const hasTokenParam = !!url.searchParams.get('token');
+  if (tenantHint && !hasTokenParam) { try { localStorage.setItem('tenantId', tenantHint); tenantId = tenantHint; } catch {} }
   if (clientIdHint) { try { localStorage.setItem('appClientIdHint', clientIdHint); } catch {} }
   if (appIdHint) { try { localStorage.setItem('appIdHint', appIdHint); } catch {} }
   const tokenFromUrl = url.searchParams.get('token');
   const cameFromIdp = !!tokenFromUrl;
+  console.log('[DEBUG] Token detection - tokenFromUrl:', !!tokenFromUrl, 'cameFromIdp:', cameFromIdp);
   if (tokenFromUrl) {
     authToken = tokenFromUrl;
     localStorage.setItem('authToken', authToken);
@@ -1079,13 +1124,13 @@ async function init() {
   }
   // If we arrived with a fresh token, immediately reflect authenticated UI
   if (cameFromIdp && state.user) {
-    onAuthenticated();
+    onAuthenticated(true); // Fresh authentication from IDP
     return;
   }
 
   // If we have a user (whether from IDP or pre-existing token), show authenticated UI
   if (state.user) {
-    onAuthenticated();
+    onAuthenticated(false); // Pre-existing session - restore state
   }
 
   // Role based UI adjustments

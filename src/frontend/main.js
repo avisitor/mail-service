@@ -873,11 +873,16 @@ function updateNavigationVisibility() {
     const roles = state.user?.roles || [];
     const isEditorOnlyUser = isEditorOnly();
     const appsNavBtn = document.querySelector('[data-view="apps"]');
+    const composeNavBtn = document.querySelector('[data-view="compose"]');
     const tenantsNavBtn = document.querySelector('[data-view="tenants"]');
     const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]');
     if (appsNavBtn) {
-        // Apps button visible for tenant_admin and superadmin (in any context)
-        appsNavBtn.style.display = (isInTenantAdminContext() || canPerformSuperadminActions()) ? 'block' : 'none';
+        // Apps button visible for tenant_admin and superadmin ONLY when in tenant context
+        appsNavBtn.style.display = (isInTenantAdminContext() || (canPerformSuperadminActions() && roleContext.isInTenantContext)) ? 'block' : 'none';
+    }
+    if (composeNavBtn) {
+        // Compose button hidden for superadmin when not in tenant context
+        composeNavBtn.style.display = (canPerformSuperadminActions() && !roleContext.isInTenantContext) ? 'none' : 'block';
     }
     if (tenantsNavBtn) {
         // Tenants button only visible for superadmin outside tenant context
@@ -1040,7 +1045,10 @@ function wireNav() {
         showView(btn.dataset.view);
         savePageState();
     }));
-    showView('compose');
+    
+    // Default view: Config for superadmins not in tenant context, otherwise Compose
+    const defaultView = (canPerformSuperadminActions() && !roleContext.isInTenantContext) ? 'smtp-config' : 'compose';
+    showView(defaultView);
 }
 // Manage Tenants button (in compose context panel)
 document.getElementById('goToTenantsBtn')?.addEventListener('click', () => showView('tenants'));
