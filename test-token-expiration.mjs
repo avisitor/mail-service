@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+
+console.log('=== Token Expiration Handling Test ===');
+console.log('');
+console.log('To test the improved token expiration handling:');
+console.log('');
+console.log('1. **Login normally** via IDP redirect');
+console.log('   - Open http://localhost:3100/ui/ in incognito');
+console.log('   - Complete IDP authentication');
+console.log('   - Verify you can access the UI');
+console.log('');
+console.log('2. **Simulate token expiration**:');
+console.log('   - Open browser dev tools → Application → Local Storage');
+console.log('   - Find the "authToken" entry');
+console.log('   - Modify the token (change a few characters to make it invalid)');
+console.log('   - OR delete the token entirely');
+console.log('');
+console.log('3. **Test expiration behavior**:');
+console.log('   - Refresh the page (F5)');
+console.log('   - Check browser console for debug logs');
+console.log('');
+console.log('**Expected Behavior** (FIXED):');
+console.log('✅ Should detect token validation failure');
+console.log('✅ Should clear sessionStorage idpRedirected flag');
+console.log('✅ Should automatically redirect to IDP for fresh auth');
+console.log('✅ Should NOT show manual JWT paste dialog');
+console.log('');
+console.log('**Previous Broken Behavior**:');
+console.log('❌ Would show manual JWT paste dialog');
+console.log('❌ Would not redirect to IDP');
+console.log('❌ Required manual intervention');
+console.log('');
+console.log('**Console logs to watch for**:');
+console.log('[ui-auth] Stored token failed validation (likely expired), clearing idpRedirected flag for fresh redirect');
+console.log('[ui-auth] Setting idpRedirected flag and redirecting to: https://idp.worldspot.org/...');
+console.log('');
+console.log('The fix ensures expired tokens trigger automatic IDP redirects rather than manual login prompts.');

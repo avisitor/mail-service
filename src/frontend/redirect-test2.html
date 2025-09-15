@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirect Test</title>
+</head>
+<body>
+    <h1>Testing Redirect Logic</h1>
+    <p>Open browser console to see debug logs.</p>
+    <div id="status">Loading...</div>
+    
+    <script>
+        // Clear sessionStorage first
+        try {
+            sessionStorage.clear();
+            console.log('[Test] Cleared sessionStorage');
+        } catch (e) {
+            console.error('[Test] Could not clear sessionStorage:', e);
+        }
+        
+        // Override location.href to log instead of actually redirecting
+        let redirectUrl = null;
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            value: {
+                ...originalLocation,
+                set href(url) {
+                    console.log('[Test] REDIRECT TRIGGERED:', url);
+                    redirectUrl = url;
+                    document.getElementById('status').innerHTML = `
+                        <div style="color: green; font-weight: bold;">✅ REDIRECT SUCCESS!</div>
+                        <div>Would redirect to: <a href="${url}" target="_blank">${url}</a></div>
+                    `;
+                }
+            }
+        });
+        
+        // Load the actual main.js
+        const script = document.createElement('script');
+        script.src = '/ui/main.js';
+        script.type = 'module';
+        script.onload = () => {
+            console.log('[Test] Main.js loaded, checking redirect...');
+            setTimeout(() => {
+                if (!redirectUrl) {
+                    document.getElementById('status').innerHTML = `
+                        <div style="color: red; font-weight: bold;">❌ NO REDIRECT</div>
+                        <div>Check console for debug logs</div>
+                    `;
+                }
+            }, 2000);
+        };
+        script.onerror = (e) => {
+            console.error('[Test] Failed to load main.js:', e);
+            document.getElementById('status').innerHTML = `
+                <div style="color: red; font-weight: bold;">❌ SCRIPT ERROR</div>
+                <div>Failed to load main.js</div>
+            `;
+        };
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Flow Testing</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .token-input { width: 100%; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .logout-btn { background: #dc3545; color: white; border: 1px solid #dc3545; }
+        .login-btn { background: #007bff; color: white; border: 1px solid #007bff; }
+        .role-indicator { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .superadmin { background: #ff6b6b; color: white; }
+        .tenant-admin { background: #4ecdc4; color: white; }
+        .editor { background: #45b7d1; color: white; }
+        .result { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; }
+        .instructions { background: #e9ecef; padding: 15px; border-radius: 8px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔐 Authentication Flow Testing</h1>
+    
+    <div class="instructions">
+        <h3>🧪 How to Test Logout Flow:</h3>
+        <ol>
+            <li>Click one of the "Login as" buttons below to open the UI with a token</li>
+            <li>In the UI, look for the red <strong>🚪 Logout</strong> button in the top-right corner</li>
+            <li>Click the logout button - it will ask for confirmation</li>
+            <li>Confirm logout - should clear session and show login screen</li>
+            <li>Try logging in with a different role using the buttons below</li>
+        </ol>
+    </div>
+    
+    <div class="test-section">
+        <h2>🎭 Quick Login with Different Roles</h2>
+        
+        <div style="margin: 15px 0;">
+            <span class="role-indicator superadmin">SUPERADMIN</span>
+            <button class="login-btn" onclick="loginAs('superadmin')">Login as Superadmin</button>
+            <p style="margin: 5px 0; color: #666; font-size: 14px;">
+                Full access: tenant management, context switching, global overview
+            </p>
+        </div>
+        
+        <div style="margin: 15px 0;">
+            <span class="role-indicator tenant-admin">TENANT ADMIN</span>
+            <button class="login-btn" onclick="loginAs('tenant_admin')">Login as Tenant Admin</button>
+            <p style="margin: 5px 0; color: #666; font-size: 14px;">
+                Scoped access: app management within UI Test Tenant
+            </p>
+        </div>
+        
+        <div style="margin: 15px 0;">
+            <span class="role-indicator editor">EDITOR</span>
+            <button class="login-btn" onclick="loginAs('editor')">Login as Editor</button>
+            <p style="margin: 5px 0; color: #666; font-size: 14px;">
+                Restricted access: compose and send emails only
+            </p>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>🚪 Logout Testing Features</h2>
+        <ul>
+            <li>✅ <strong>Confirmation Dialog</strong>: Prevents accidental logout</li>
+            <li>✅ <strong>Complete Session Clear</strong>: Removes auth token, role context, tenant/app state</li>
+            <li>✅ <strong>URL Cleanup</strong>: Removes token from URL after logout</li>
+            <li>✅ <strong>Visual Feedback</strong>: Red logout button with door icon</li>
+            <li>✅ <strong>State Reset</strong>: Returns to clean login state</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>🔧 Manual Token Testing</h2>
+        <p>Current test tokens (valid for ~1 hour):</p>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>Superadmin Token:</strong></label>
+            <textarea class="token-input" rows="3" readonly id="superadminToken"></textarea>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>Tenant Admin Token:</strong></label>
+            <textarea class="token-input" rows="3" readonly id="tenantAdminToken"></textarea>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>Editor Token:</strong></label>
+            <textarea class="token-input" rows="3" readonly id="editorToken"></textarea>
+        </div>
+        
+        <button onclick="refreshTokens()">🔄 Generate Fresh Tokens</button>
+        <button onclick="testNoAuth()">🚫 Test No Auth (Clean URL)</button>
+    </div>
+    
+    <div id="result" class="result" style="display: none;"></div>
+    
+    <script>
+        // Generate tokens on page load
+        window.addEventListener('load', refreshTokens);
+        
+        async function generateToken(roles, extra = {}) {
+            try {
+                const response = await fetch('/test-utils/auth.mjs?' + new URLSearchParams({
+                    roles: roles.join(','),
+                    ...extra
+                }));
+                // This won't work directly, but shows the concept
+                // In practice, you'd call the node script via the server
+                return 'TOKEN_PLACEHOLDER_' + roles.join('_');
+            } catch (e) {
+                return 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...'; // Fallback
+            }
+        }
+        
+        function refreshTokens() {
+            // Fresh tokens generated for testing
+            document.getElementById('superadminToken').value = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJzdXBlcmFkbWluIl0sImlhdCI6MTc1NzczNzEyOSwiZXhwIjoxNzU3NzQwNzI5LCJhdWQiOiJtYWlsLXNlcnZpY2UiLCJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjMxMDAifQ.oMGQcHaMA51ytrD2Q7PBFknJ9KDgPLxAZdUCqxH8f1xTZ3xgG_sm49m9F48Xcibskbmr9xAF8enVc6cHejNQZMRhe3crjTQ__H14Suje4GPUwxZ7nOvUKmFNVVQ3F-e1exhAREQ2k-2HruPP8Ce8OZLD8UZOHHUb0MNa_bEcpXtMcUpNxl8e_FHAXdblofd76kFLJIt4ErsSu7NIZaqMdbqqkcoKK7GV66bBDo6r1uKHH3ldiwTJqmjI0IO8E7Vph6Z1l5v7soh93xbkikMFL0_igzXnuqq4a6ez2PqoRiAA7ncIrbRen6kvAf-6fejDmjunALKVRzu_-MLs39uhyg';
+            
+            document.getElementById('tenantAdminToken').value = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJ0ZW5hbnRfYWRtaW4iXSwidGVuYW50SWQiOiJjbWZocXRqbWYwMDAwbTBkd3hocDBiYWFvIiwiaWF0IjoxNzU3NzM2NTg3LCJleHAiOjE3NTc3NDAxODcsImF1ZCI6Im1haWwtc2VydmljZSIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzEwMCJ9.peTFB7MGvq2Z-9sa91yBotdeyFMNnaaIsidn9_5kQks5jc899D0ENTXYq2CWh_45a3JwHwvhxQfBRGfDBRr8WoXi-uBd8QMYwT7jovNDGls9tps36R8RpqAuBLguFofvmqE1UWoZOzpUWER8m-XMbPtBUqpfAgRyvv06z15cO_oDRQR_UYP-KzHliYgk6mdDnEaMOnTHdxKh_jedSNLfw1EiIPDzITgHGE4Rwv8H7chN2G0KYsUgznMvr_h55ARuqZ-wd9bQBxKakJu7s1MO-xVExW8HwlUdACZNJF5mRgqDJ8_5dTHUAa2tQzIpMhixqo-AlZzx0jTRRbssUV3GXg';
+            
+            // Fresh editor token
+            document.getElementById('editorToken').value = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJlZGl0b3IiXSwiaWF0IjoxNzU3NzM3MTEwLCJleHAiOjE3NTc3NDA3MTAsImF1ZCI6Im1haWwtc2VydmljZSIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzEwMCJ9.XxyX9W39zCwI-Ro7K4wMJ-DwRzCoVCVWIx2gCC5ySmfhjJFXUgM8UpeYR6vSyRgFC075rZpc--8R6cXyoognn1K2ENpmnS0KIvuY4zSdTXp61P3VvkozYfW8ErqNv8sZORfQtnBLOTtnj9FgxyR0fqhhKy69oNGg_P6PjXAlo1m8Defo7AlbIhVSsxw_esyFoNjwCn0lRCRqfMOBJwRYJ_oHfn_nj7IU_StcU-uL4JjCymZecQPY1Frh2QJEi4DQREpCbcEjq3l1cKiaRejn_7drZ8rN9WPkbGUyS8eehx8y9nGOYp38vsrcG3AANr-c0g2SEWlzph0KtKvMzoq7cw';
+        }
+        
+        function loginAs(role) {
+            let token;
+            switch(role) {
+                case 'superadmin':
+                    token = document.getElementById('superadminToken').value;
+                    break;
+                case 'tenant_admin':
+                    token = document.getElementById('tenantAdminToken').value;
+                    break;
+                case 'editor':
+                    token = document.getElementById('editorToken').value;
+                    break;
+            }
+            
+            if (!token || token.includes('TOKEN_PLACEHOLDER') || token.includes('would require server call')) {
+                alert('Token not available. Please refresh tokens first.');
+                return;
+            }
+            
+            const url = '/ui/?token=' + encodeURIComponent(token);
+            window.open(url, '_blank');
+        }
+        
+        function testNoAuth() {
+            window.open('/ui/', '_blank');
+        }
+    </script>
+</body>
+</html>

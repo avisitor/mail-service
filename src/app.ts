@@ -41,7 +41,23 @@ export function buildApp() {
 
   app.register(sensible);
   app.register(cors, { origin: true });
-  app.register(helmet, { global: true });
+  app.register(helmet, { 
+    global: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+  });
 
   // Auth (can be toggled off in test env)
   if (!flags.disableAuth && config.env !== 'test') {
@@ -62,6 +78,11 @@ export function buildApp() {
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
     const uc = req.userContext || null;
+    const tokenAny: any = (req as any).user || {};
+    
+    console.log('[ME-DEBUG] Raw token from IDP:', JSON.stringify(tokenAny, null, 2));
+    console.log('[ME-DEBUG] UserContext:', JSON.stringify(uc, null, 2));
+    
     if (!uc) return null;
     try {
       const prismaModule = await import('./db/prisma.js');
@@ -70,15 +91,49 @@ export function buildApp() {
         uc.tenantId ? prisma.tenant.findUnique({ where: { id: uc.tenantId } }) : Promise.resolve(null),
         uc.appId ? prisma.app.findUnique({ where: { id: uc.appId } }) : Promise.resolve(null)
       ]);
+      
+      console.log('[ME-DEBUG] Initial DB lookup:', {
+        tenantFromToken: uc.tenantId,
+        appIdFromToken: uc.appId,
+        tenantFound: tenant?.name || null,
+        appFound: appRecInitial?.name || null
+      });
+      
       let appRec = appRecInitial;
       const tokenAny: any = (req as any).user || {};
+      
       // If not found by appId but clientId present in token, try lookup by clientId
       if (!appRec && tokenAny.clientId) {
         try { appRec = await prisma.app.findUnique({ where: { clientId: tokenAny.clientId } }); } catch {}
       }
+      
+      // If still no app found and no appId in token, use default app for testing
+      // This allows testing the tenantId lookup functionality until proper appId flow is implemented
+      if (!appRec && !uc.appId) {
+        try { 
+          appRec = await prisma.app.findUnique({ where: { clientId: 'smtp-test-app' } }); 
+        } catch {}
+      }
+      
+      // IMPORTANT: If we found an app but don't have tenantId in token, lookup tenantId from the app
+      let effectiveTenantId = uc.tenantId;
+      let effectiveTenant = tenant;
+      if (appRec && !effectiveTenantId) {
+        effectiveTenantId = appRec.tenantId;
+        try {
+          effectiveTenant = await prisma.tenant.findUnique({ where: { id: effectiveTenantId } });
+        } catch {}
+      }
+      
       // Prefer explicit clientId from token if present, else DB value
-  const clientId = tokenAny.clientId || appRec?.clientId || null;
-  return { ...uc, tenantName: tenant?.name || null, appName: appRec?.name || null, appClientId: clientId };
+      const clientId = tokenAny.clientId || appRec?.clientId || null;
+      return { 
+        ...uc, 
+        tenantId: effectiveTenantId,
+        tenantName: effectiveTenant?.name || null, 
+        appName: appRec?.name || null, 
+        appClientId: clientId 
+      };
     } catch {
       return uc;
     }

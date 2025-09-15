@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirect Test</title>
+</head>
+<body>
+    <h1>Testing Redirect Logic</h1>
+    <div id="output"></div>
+    
+    <script>
+        const output = document.getElementById('output');
+        
+        // Capture console logs
+        const originalLog = console.log;
+        const originalDebug = console.debug;
+        const originalError = console.error;
+        
+        function addToOutput(type, ...args) {
+            const div = document.createElement('div');
+            div.style.margin = '5px 0';
+            div.style.padding = '5px';
+            div.style.border = `1px solid ${type === 'error' ? 'red' : type === 'debug' ? 'blue' : 'green'}`;
+            div.textContent = `[${type.toUpperCase()}] ${args.map(String).join(' ')}`;
+            output.appendChild(div);
+        }
+        
+        console.log = (...args) => {
+            originalLog(...args);
+            addToOutput('log', ...args);
+        };
+        
+        console.debug = (...args) => {
+            originalDebug(...args);
+            addToOutput('debug', ...args);
+        };
+        
+        console.error = (...args) => {
+            originalError(...args);
+            addToOutput('error', ...args);
+        };
+        
+        // Clear sessionStorage first
+        try {
+            sessionStorage.clear();
+            console.log('Cleared sessionStorage');
+        } catch (e) {
+            console.error('Could not clear sessionStorage:', e);
+        }
+        
+        // Load the main UI in an iframe to see what happens
+        console.log('Loading UI in iframe...');
+        
+        const iframe = document.createElement('iframe');
+        iframe.src = '/ui/';
+        iframe.style.width = '100%';
+        iframe.style.height = '400px';
+        iframe.style.border = '1px solid #ccc';
+        iframe.style.marginTop = '20px';
+        
+        iframe.onload = () => {
+            console.log('Iframe loaded');
+            setTimeout(() => {
+                try {
+                    const iframeUrl = iframe.contentWindow.location.href;
+                    console.log('Iframe URL after load:', iframeUrl);
+                } catch (e) {
+                    console.log('Cannot access iframe URL (cross-origin):', e.message);
+                }
+            }, 1000);
+        };
+        
+        iframe.onerror = (e) => {
+            console.error('Iframe error:', e);
+        };
+        
+        document.body.appendChild(iframe);
+        
+        // Also test direct navigation after a delay
+        setTimeout(() => {
+            console.log('Testing direct navigation...');
+            window.location.href = '/ui/';
+        }, 5000);
+    </script>
+</body>
+</html>

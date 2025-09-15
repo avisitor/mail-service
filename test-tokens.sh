@@ -1,0 +1,18 @@
+#!/bin/bash
+# Test tokens for multi-tenant UI validation
+
+echo "=== Superadmin Token ==="
+echo "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJzdXBlcmFkbWluIl0sImlhdCI6MTc1NzczNjE0OCwiZXhwIjoxNzU3NzM5NzQ4LCJhdWQiOiJtYWlsLXNlcnZpY2UiLCJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjMxMDAifQ.bRkfn081P7wmW4mXc4109QMtWbQu1ER7rB5Dl5IgsZhAUG0LMO0fDvbuOi9hc-19EDoF-hOizmi-63jd8Mr_CTUtQbe7_pbq_ygsQBYFWy5RWFEiVzuQVlJ_zHZcNMtcOahFnJo11pnNvQvOfsa0tqOEGBhqarQriiZNlkrp3zTe8Egzz0o9Jl5ZKsSO1tjWyr1Ly8QsMDC6uwVLmpQEy0Kk697sbB44mupJDrFebiev32qqanL_WuEee6nUi-eobrQmHEzgqHIYv2zDmoYV0lFD6BWEGHdGGq43m66dV8k7WFS66Waw1XaFH-O5rf50k81wabKekfPLMGulZz4tWA"
+
+echo ""
+echo "=== Tenant Admin Token (tenant1) ==="
+echo "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJ0ZW5hbnRfYWRtaW4iXSwidGVuYW50SWQiOiJ0ZW5hbnQxIiwiaWF0IjoxNzU3NzM2MTU2LCJleHAiOjE3NTc3Mzk3NTYsImF1ZCI6Im1haWwtc2VydmljZSIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzEwMCJ9.wOQU7zJAa4xNO6dHOFtikOJQbniVrgA6sy96cOslBs5Yrhf0COYynQXs9fJlPkxKDqGjnuyqJWBErqx_wEue12_PMkuN5awof2eXexpGG6kwFNrmAWeunLE6-m8-KXN3KkQdjV5hpQ5rxcYZrFDzdPtn7LxqnVMf5JYDXfAQaKa4APa3YESdctB7ouoLG3ciRmG2KInaJpvN70So4SiuiImsj3AMDhbaGAtdYI79zSOmjbCRYc3uXAroQn7cvDcfUD53pgKIbSxI9beMPHImaJAgp6BZdAb4uOl_rtRbSm1HPWaHJe2hM5oi37DMupF0H1qLAWD7H20BZmVdN4JGrg"
+
+echo ""
+echo "To test:"
+echo "1. Copy one of the tokens above"
+echo "2. Open browser to http://localhost:3100/ui/"
+echo "3. If prompted for token, paste it in"
+echo "4. Test the multi-tenant UI features:"
+echo "   - Superadmin: Should see Tenants nav, context switching, all features"
+echo "   - Tenant Admin: Should see Apps nav, tenant-scoped app management"

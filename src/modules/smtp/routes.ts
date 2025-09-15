@@ -7,7 +7,9 @@ import {
   createSmtpConfig,
   updateSmtpConfig,
   deleteSmtpConfig,
-  getEffectiveSmtpConfig
+  getEffectiveSmtpConfig,
+  activateGlobalSmtpConfig,
+  getNextActiveConfig
 } from './service.js';
 import { SmtpConfigInput } from './types.js';
 
@@ -18,15 +20,15 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
   app.get('/smtp-configs', async (req, reply) => {
     try {
       const userContext = await AuthService.requireAuth(req, reply);
-      if (userContext === null && !reply.sent) return; // Auth failed, response sent
+      if (userContext === null) return; // Auth failed, response already sent
       
-      // Convert to service layer context (null when auth disabled)
-      const serviceContext = AuthService.getServiceContext(userContext);
-      const configs = await listSmtpConfigs(serviceContext);
+      const configs = await listSmtpConfigs(userContext);
       return reply.send(configs);
     } catch (error: any) {
       app.log.error({ error }, 'Failed to list SMTP configs');
-      return reply.internalServerError(error.message);
+      if (!reply.sent) {
+        return reply.internalServerError(error.message);
+      }
     }
   });
 
@@ -257,7 +259,34 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
     }
   });
 
-  // Test SMTP configuration (dry run)
+  // Get next config that would be activated if current active config is deleted
+  app.get('/smtp-configs/:id/next-active', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+
+      const config = await getSmtpConfig(id, userContext);
+      if (!config) {
+        return reply.notFound('SMTP configuration not found');
+      }
+
+      // Only makes sense for active global configs
+      if (!config.isActive || config.scope !== 'GLOBAL') {
+        return { nextConfig: null, reason: 'Only active global configurations can have replacements' };
+      }
+
+      const nextConfig = await getNextActiveConfig(id, userContext);
+      return { nextConfig };
+      
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to get next active config');
+      return reply.internalServerError(error.message);
+    }
+  });
+
+  // Test SMTP configuration (actual connection test)
   app.post('/smtp-configs/:id/test', {
     preHandler: (req, reply) => app.authenticate(req, reply),
     schema: {
@@ -275,8 +304,6 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     try {
       const userContext = (req as any).userContext;
-      // If authentication is disabled, userContext may be null - that's ok
-
       const { id } = req.params as { id: string };
       const { to, subject, text, html } = req.body as any;
 
@@ -285,27 +312,171 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
         return reply.notFound('SMTP configuration not found');
       }
 
-      // TODO: Implement actual test sending using the specific config
-      // For now, just validate the configuration exists
-      return {
-        success: true,
-        message: 'SMTP configuration test would be sent',
-        config: {
-          id: config.id,
-          scope: config.scope,
-          host: config.host,
-          port: config.port,
-        },
-        testEmail: {
-          to,
-          subject,
-          hasText: !!text,
-          hasHtml: !!html,
-        },
-      };
+      // Test the actual connection based on service type
+      if (config.service === 'ses') {
+        // Test SES configuration - need to get raw config with decrypted credentials
+        try {
+          // Get the raw config from database to decrypt credentials
+          const { getPrisma } = await import('../../db/prisma.js');
+          const prisma = getPrisma();
+          const rawConfig = await prisma.smtpConfig.findUnique({
+            where: { id: config.id },
+          });
+          
+          if (!rawConfig) {
+            return {
+              success: false,
+              message: 'Configuration not found',
+              service: 'ses',
+            };
+          }
+
+          // Decrypt the stored credentials
+          const { decrypt } = await import('./service.js');
+          const actualAccessKey = rawConfig.awsAccessKey ? decrypt(rawConfig.awsAccessKey) : '';
+          const actualSecretKey = rawConfig.awsSecretKey ? decrypt(rawConfig.awsSecretKey) : '';
+
+          app.log.info({ 
+            configId: config.id, 
+            region: rawConfig.awsRegion,
+            hasAccessKey: !!actualAccessKey,
+            hasSecretKey: !!actualSecretKey 
+          }, 'Testing SES configuration');
+
+          const sesClient = new (await import('@aws-sdk/client-ses')).SESClient({
+            region: rawConfig.awsRegion || 'us-east-1',
+            credentials: {
+              accessKeyId: actualAccessKey,
+              secretAccessKey: actualSecretKey,
+            },
+          });
+
+          // Test SES by getting sending quota (lightweight test)
+          const getSendQuotaCommand = new (await import('@aws-sdk/client-ses')).GetSendQuotaCommand({});
+          await sesClient.send(getSendQuotaCommand);
+
+          return {
+            success: true,
+            message: 'SES configuration is valid and accessible',
+            service: 'ses',
+            config: {
+              id: config.id,
+              scope: config.scope,
+              region: rawConfig.awsRegion,
+            },
+          };
+        } catch (sesError: any) {
+          app.log.error({ error: sesError, configId: config.id }, 'SES configuration test failed');
+          return {
+            success: false,
+            message: `SES test failed: ${sesError.message}`,
+            service: 'ses',
+            error: sesError.name,
+          };
+        }
+      } else {
+        // Test SMTP configuration - need to get raw config with decrypted credentials
+        try {
+          // Get the raw config from database to decrypt credentials
+          const { getPrisma } = await import('../../db/prisma.js');
+          const prisma = getPrisma();
+          const rawConfig = await prisma.smtpConfig.findUnique({
+            where: { id: config.id },
+          });
+          
+          if (!rawConfig) {
+            return {
+              success: false,
+              message: 'Configuration not found',
+              service: 'smtp',
+            };
+          }
+
+          // Decrypt the stored credentials
+          const { decrypt } = await import('./service.js');
+          const actualPassword = rawConfig.pass ? decrypt(rawConfig.pass) : undefined;
+
+          app.log.info({ 
+            configId: config.id, 
+            host: rawConfig.host,
+            port: rawConfig.port,
+            hasUser: !!rawConfig.user,
+            hasPassword: !!actualPassword 
+          }, 'Testing SMTP configuration');
+
+          const nodemailer = await import('nodemailer');
+          const transporter = nodemailer.createTransport({
+            host: rawConfig.host,
+            port: rawConfig.port,
+            secure: rawConfig.secure,
+            auth: rawConfig.user ? {
+              user: rawConfig.user,
+              pass: actualPassword,
+            } : undefined,
+            // Add connection timeout
+            connectionTimeout: 10000, // 10 seconds
+            greetingTimeout: 10000,   // 10 seconds
+          });
+
+          // Test the connection
+          const isValid = await transporter.verify();
+          
+          if (isValid) {
+            return {
+              success: true,
+              message: 'SMTP configuration is valid and server is accessible',
+              service: 'smtp',
+              config: {
+                id: config.id,
+                scope: config.scope,
+                host: config.host,
+                port: config.port,
+                secure: config.secure,
+                hasAuth: !!config.user,
+              },
+            };
+          } else {
+            return {
+              success: false,
+              message: 'SMTP server connection failed',
+              service: 'smtp',
+            };
+          }
+        } catch (smtpError: any) {
+          app.log.error({ error: smtpError }, 'SMTP configuration test failed');
+          return {
+            success: false,
+            message: `SMTP test failed: ${smtpError.message}`,
+            service: 'smtp',
+            error: smtpError.code || smtpError.name,
+          };
+        }
+      }
     } catch (error: any) {
       app.log.error({ error }, 'Failed to test SMTP config');
       return reply.internalServerError(error.message);
+    }
+  });
+
+  // Activate/deactivate global SMTP configuration
+  app.post('/smtp-configs/:id/activate', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+      
+      const result = await activateGlobalSmtpConfig(id, userContext);
+      return result;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to activate SMTP config');
+      if (error.message.includes('not found') || error.message.includes('access denied')) {
+        return reply.notFound(error.message);
+      }
+      if (error.message.includes('permission') || error.message.includes('superadmin')) {
+        return reply.forbidden(error.message);
+      }
+      return reply.badRequest(error.message);
     }
   });
 };

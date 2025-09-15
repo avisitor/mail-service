@@ -168,6 +168,8 @@ model SmtpConfig {
   updatedAt   DateTime       @updatedAt
   createdBy   String?        // user sub who created this config
   
-  @@unique([scope, tenantId, appId])
+  // Unique constraint only for TENANT and APP scopes (handled in application logic)
+  // Multiple GLOBAL configs allowed, but only one should be active
   @@index([scope, tenantId, appId])
+  @@index([scope, isActive]) // For efficient queries of active configs
 }

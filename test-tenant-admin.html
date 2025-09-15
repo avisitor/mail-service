@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Tenant Admin Login</title>
+</head>
+<body>
+    <h1>Test Tenant Admin - Acme Corporation</h1>
+    <p>This page tests the tenant admin fix by setting the token automatically.</p>
+    
+    <script>
+        // Clear any existing tokens first
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Set the tenant admin token for test-tenant-1 (Acme Corporation) with ReTree Hawaii app
+        const tenantAdminToken = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjZjYTFhMzA5YTczNWZiODMifQ.eyJzdWIiOiJ0ZW5hbnQtYWRtaW4tdGVzdC10ZW5hbnQtMSIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzEwMCIsImF1ZCI6Im1haWwtc2VydmljZSIsImV4cCI6MTc1NzkwNDQ4MSwiaWF0IjoxNzU3OTAwODgxLCJyb2xlcyI6WyJ0ZW5hbnRfYWRtaW4iXSwidGVuYW50SWQiOiJ0ZXN0LXRlbmFudC0xIiwiYXBwSWQiOiJjbWZrYTY4OHIwMDAxYjc3b2ZwZ201N2l4In0.Qzb2A9dWzRoJ8fXs7PemK7PoLIp_Pdrqz9RLZt-e8pgx23AXFZGQH-62sSiX1RisbL9jmiEsYJYNWI6VUW7_-SysJZ8LXS-vXyeA0ldZyQp8lQOc1OKt2YzbXywDndGHPS_d2rthlUgrLVS70M4-aG5Q6yHaIQ-_AP2hvxaXGTne1UulOK6grzYcC40FSsbvBWcypbNYxKt79iuBk4-b4NeBgvxQIbLrErmLe5jXgtwsvivUrJhchG0OIJwiZdO33pq7z_ZVofSU3-keo9ib5SODS0dImm77zuoANmDrXcuXfwzhw-wxoQfugXOu_3yb3kMDdYM-rP_7PLOzBks_gg';
+        
+        localStorage.setItem('authToken', tenantAdminToken);
+        
+        console.log('Set tenant admin token for test-tenant-1 (Acme Corporation)');
+        console.log('Token should show: ReTree Hawaii app');
+        
+        // Redirect to main app
+        window.location.href = '/';
+    </script>
+</body>
+</html>

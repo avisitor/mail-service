@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { flags } from '../config.js';
-import { UserContext, UserRole, hasRole } from './roles.js';
+import { extractUser, UserContext, UserRole, hasRole } from './roles.js';
 
 /**
  * Centralized authentication service that handles both authenticated and bypass modes
@@ -20,12 +20,13 @@ export class AuthService {
       };
     }
 
-    // Use the existing authenticate decorator
+    // Manually handle JWT verification without sending response
     try {
-      await (request.server as any).authenticate(request, reply);
-      return (request as any).userContext;
+      await (request as any).jwtVerify();
+      // Extract user context from verified JWT using proper role claim extraction
+      return await extractUser(request);
     } catch (error) {
-      // Authentication failed, return null
+      // Authentication failed, return null without sending response
       return null;
     }
   }
@@ -51,26 +52,53 @@ export class AuthService {
    * If auth is disabled, returns system superadmin context (which has all roles)
    * If user doesn't have required role, sends 403 response and returns null
    */
-  static async requireRole(
-    request: FastifyRequest, 
-    reply: FastifyReply, 
-    requiredRole: UserRole | UserRole[]
-  ): Promise<UserContext | null> {
+  static async requireRole(request: FastifyRequest, reply: FastifyReply, roles: UserRole | UserRole[]): Promise<UserContext | null> {
     const userContext = await this.requireAuth(request, reply);
+    if (!userContext) return null; // Response already sent by requireAuth
     
-    if (!userContext) {
-      return null; // Auth already failed, response sent
-    }
-
-    const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-    const hasRequiredRole = roles.some(role => hasRole(userContext, role));
+    const roleArray = Array.isArray(roles) ? roles : [roles];
     
-    if (!hasRequiredRole) {
+    if (!userContext.roles.some(role => roleArray.includes(role))) {
       reply.forbidden();
       return null;
     }
     
     return userContext;
+  }
+
+  /**
+   * Create middleware that requires specific role(s)
+   * Returns a Fastify preHandler middleware function
+   */
+  static requireRoleMiddleware(roles: string | string[]): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
+    const roleArray = Array.isArray(roles) ? roles : [roles];
+    
+    return async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const authHeader = request.headers.authorization;
+        if (!authHeader?.startsWith('Bearer ')) {
+          return reply.code(401).send({ error: 'Missing or invalid authorization header' });
+        }
+
+        const token = authHeader.slice(7);
+        await (request as any).jwtVerify();
+        
+        // Extract user context from token (extractUser handles tenantId resolution)
+        const userContext = await extractUser(request);
+        
+        if (!userContext) {
+          return reply.code(401).send({ error: 'Invalid token' });
+        }
+
+        if (!userContext.roles.some((role: string) => roleArray.includes(role))) {
+          return reply.code(403).send({ error: 'Insufficient permissions' });
+        }
+
+        (request as any).userContext = userContext;
+      } catch (error) {
+        return reply.code(401).send({ error: 'Invalid token' });
+      }
+    };
   }
 
   /**

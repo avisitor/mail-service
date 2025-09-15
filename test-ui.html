@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multi-tenant UI Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        .token-input { width: 100%; padding: 10px; margin: 10px 0; }
+        button { padding: 10px 20px; margin: 5px; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <h1>Multi-tenant UI Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Tokens</h2>
+        <p><strong>Superadmin Token:</strong></p>
+        <input type="text" class="token-input" id="superadminToken" value="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJzdXBlcmFkbWluIl0sImlhdCI6MTc1NzczNjE0OCwiZXhwIjoxNzU3NzM5NzQ4LCJhdWQiOiJtYWlsLXNlcnZpY2UiLCJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjMxMDAifQ.bRkfn081P7wmW4mXc4109QMtWbQu1ER7rB5Dl5IgsZhAUG0LMO0fDvbuOi9hc-19EDoF-hOizmi-63jd8Mr_CTUtQbe7_pbq_ygsQBYFWy5RWFEiVzuQVlJ_zHZcNMtcOahFnJo11pnNvQvOfsa0tqOEGBhqarQriiZNlkrp3zTe8Egzz0o9Jl5ZKsSO1tjWyr1Ly8QsMDC6uwVLmpQEy0Kk697sbB44mupJDrFebiev32qqanL_WuEee6nUi-eobrQmHEzgqHIYv2zDmoYV0lFD6BWEGHdGGq43m66dV8k7WFS66Waw1XaFH-O5rf50k81wabKekfPLMGulZz4tWA">
+        
+        <p><strong>Tenant Admin Token:</strong></p>
+        <input type="text" class="token-input" id="tenantAdminToken" value="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjViOGExZGI1ZTA1M2ZmZmYifQ.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlcyI6WyJ0ZW5hbnRfYWRtaW4iXSwidGVuYW50SWQiOiJ0ZW5hbnQxIiwiaWF0IjoxNzU3NzM2MTU2LCJleHAiOjE3NTc3Mzk3NTYsImF1ZCI6Im1haWwtc2VydmljZSIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzEwMCJ9.wOQU7zJAa4xNO6dHOFtikOJQbniVrgA6sy96cOslBs5Yrhf0COYynQXs9fJlPkxKDqGjnuyqJWBErqx_wEue12_PMkuN5awof2eXexpGG6kwFNrmAWeunLE6-m8-KXN3KkQdjV5hpQ5rxcYZrFDzdPtn7LxqnVMf5JYDXfAQaKa4APa3YESdctB7ouoLG3ciRmG2KInaJpvN70So4SiuiImsj3AMDhbaGAtdYI79zSOmjbCRYc3uXAroQn7cvDcfUD53pgKIbSxI9beMPHImaJAgp6BZdAb4uOl_rtRbSm1HPWaHJe2hM5oi37DMupF0H1qLAWD7H20BZmVdN4JGrg">
+    </div>
+    
+    <div class="test-section">
+        <h2>Quick Tests</h2>
+        <button onclick="testAuth('superadmin')">Test Superadmin Auth</button>
+        <button onclick="testAuth('tenant_admin')">Test Tenant Admin Auth</button>
+        <button onclick="openMainUI()">Open Main UI</button>
+        <div id="testResults" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Data Created</h2>
+        <p><strong>Tenant:</strong> UI Test Tenant (ID: cmfhqtjmf0000m0dwxhp0baao)</p>
+        <p><strong>App:</strong> Test App 1 (ID: cmfhqu0gj0004m0dw1bm7k00g)</p>
+    </div>
+    
+    <script>
+        async function testAuth(role) {
+            const token = role === 'superadmin' ? 
+                document.getElementById('superadminToken').value :
+                document.getElementById('tenantAdminToken').value;
+                
+            try {
+                const response = await fetch('/me', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const data = await response.json();
+                document.getElementById('testResults').innerHTML = 
+                    `<strong>${role} auth result:</strong><br>${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                document.getElementById('testResults').innerHTML = 
+                    `<strong>Error:</strong> ${error.message}`;
+            }
+        }
+        
+        function openMainUI() {
+            window.open('/ui/', '_blank');
+        }
+    </script>
+</body>
+</html>

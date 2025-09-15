@@ -20,7 +20,7 @@ function encrypt(text: string): string {
   }
 }
 
-function decrypt(text: string): string {
+export function decrypt(text: string): string {
   if (!text || !text.includes(':')) return text;
   try {
     const parts = text.split(':');
@@ -276,14 +276,28 @@ export async function listSmtpConfigs(userContext: { roles: string[], tenantId?:
   // When auth is disabled (userContext is null), act as superadmin
   const isSuperAdmin = !userContext || userContext.roles.includes('superadmin');
 
-  let whereClause: any = { isActive: true };
+  let whereClause: any = {};
 
-  if (!isSuperAdmin) {
-    // Tenant admins can only see their own tenant and app configs
+  if (isSuperAdmin) {
+    // Superadmins see all configs (including inactive global configs for management)
+    // For global configs, show both active and inactive to allow activation switching
+    // For tenant/app configs, only show active ones
+    whereClause = {
+      OR: [
+        { scope: 'GLOBAL' }, // Show all global configs (active and inactive)
+        { isActive: true }    // Show only active tenant/app configs
+      ]
+    };
+  } else {
+    // Non-superadmin users only see active configs in their scope
+    whereClause = { isActive: true };
+    
+    // Tenant admins can see their own tenant/app configs + global configs (read-only)
     if (userContext?.tenantId) {
       whereClause = {
         ...whereClause,
         OR: [
+          { scope: 'GLOBAL' },  // Allow tenant admins to see global configs (read-only)
           { scope: 'TENANT', tenantId: userContext.tenantId },
           { scope: 'APP', tenantId: userContext.tenantId },
         ],
@@ -479,17 +493,19 @@ export async function createSmtpConfig(input: SmtpConfigInput, userContext: { ro
   }
   // Note: tenantId is now automatically resolved for APP scope
 
-  // Check for existing configuration at the same scope
-  const existing = await prisma.smtpConfig.findFirst({
-    where: {
-      scope: input.scope,
-      tenantId: input.tenantId || null,
-      appId: input.appId || null,
-    },
-  });
+  // Check for existing configuration at the same scope (except for GLOBAL which allows multiple)
+  if (input.scope !== 'GLOBAL') {
+    const existing = await prisma.smtpConfig.findFirst({
+      where: {
+        scope: input.scope,
+        tenantId: input.tenantId || null,
+        appId: input.appId || null,
+      },
+    });
 
-  if (existing) {
-    throw new Error(`SMTP configuration already exists for this ${input.scope.toLowerCase()} scope`);
+    if (existing) {
+      throw new Error(`SMTP configuration already exists for this ${input.scope.toLowerCase()} scope`);
+    }
   }
 
   // Encrypt sensitive fields
@@ -511,6 +527,17 @@ export async function createSmtpConfig(input: SmtpConfigInput, userContext: { ro
     isActive: input.isActive !== false,
     createdBy: userContext?.sub || 'system',
   };
+
+  // If creating an active GLOBAL config, deactivate existing active global configs
+  if (input.scope === 'GLOBAL' && data.isActive) {
+    await prisma.smtpConfig.updateMany({
+      where: { 
+        scope: 'GLOBAL',
+        isActive: true
+      },
+      data: { isActive: false }
+    });
+  }
 
   const config = await prisma.smtpConfig.create({
     data,
@@ -625,9 +652,110 @@ export async function deleteSmtpConfig(id: string, userContext: { roles: string[
   }
 
   const prisma = getPrisma();
+  
+  // Check if we're deleting an active global config
+  const wasActiveGlobal = existing.isActive && existing.scope === 'GLOBAL';
+  
+  // Delete the config
   await prisma.smtpConfig.delete({
     where: { id },
   });
+  
+  // If we deleted an active global config, auto-activate another one
+  if (wasActiveGlobal) {
+    // Find another global config to activate
+    const otherGlobalConfigs = await prisma.smtpConfig.findMany({
+      where: {
+        scope: 'GLOBAL',
+        id: { not: id }, // Exclude the one we just deleted (though it shouldn't exist anymore)
+      },
+      orderBy: [
+        { updatedAt: 'desc' }, // Prefer most recently updated
+        { createdAt: 'desc' },  // Then most recently created
+      ],
+      take: 1, // Just get the first candidate
+    });
+    
+    if (otherGlobalConfigs.length > 0) {
+      const newActiveConfig = otherGlobalConfigs[0];
+      
+      // Activate the replacement config
+      await prisma.smtpConfig.update({
+        where: { id: newActiveConfig.id },
+        data: { isActive: true },
+      });
+      
+      console.log(`Auto-activated global SMTP config ${newActiveConfig.id} (${newActiveConfig.host}) after deleting active config ${id}`);
+    } else {
+      console.warn(`Deleted the last active global SMTP config ${id} - no replacement available`);
+    }
+  }
+}
+
+/**
+ * Get the next configuration that would be activated if the specified config is deleted
+ */
+export async function getNextActiveConfig(excludeId: string, userContext: { roles: string[], tenantId?: string } | null): Promise<SmtpConfigOutput | null> {
+  if (isPrismaDisabled()) {
+    return null;
+  }
+
+  const prisma = getPrisma();
+  
+  // Find the next global config that would be activated (using same logic as delete)
+  const candidates = await prisma.smtpConfig.findMany({
+    where: {
+      scope: 'GLOBAL',
+      id: { not: excludeId },
+    },
+    orderBy: [
+      { updatedAt: 'desc' }, // Prefer most recently updated
+      { createdAt: 'desc' },  // Then most recently created
+    ],
+    take: 1,
+    include: {
+      tenant: { select: { name: true } },
+      app: { select: { name: true } },
+    },
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const config = candidates[0];
+
+  // Apply access control (same logic as getSmtpConfig)
+  const isSuperAdmin = !userContext || userContext.roles.includes('superadmin');
+  if (!isSuperAdmin) {
+    if (config.scope === 'GLOBAL' || config.tenantId !== userContext?.tenantId) {
+      return null;
+    }
+  }
+
+  return {
+    id: config.id,
+    scope: config.scope as 'GLOBAL' | 'TENANT' | 'APP',
+    tenantId: config.tenantId || undefined,
+    appId: config.appId || undefined,
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    user: config.user || undefined,
+    pass: config.pass ? maskSensitiveField(config.pass) : undefined,
+    fromAddress: config.fromAddress || undefined,
+    fromName: config.fromName || undefined,
+    service: config.service,
+    awsRegion: config.awsRegion || undefined,
+    awsAccessKey: config.awsAccessKey ? maskSensitiveField(config.awsAccessKey) : undefined,
+    awsSecretKey: config.awsSecretKey ? maskSensitiveField(config.awsSecretKey) : undefined,
+    isActive: config.isActive,
+    createdAt: config.createdAt,
+    updatedAt: config.updatedAt,
+    createdBy: config.createdBy || undefined,
+    tenantName: config.tenant?.name,
+    appName: config.app?.name,
+  };
 }
 
 /**
@@ -728,5 +856,121 @@ export async function getEffectiveSmtpConfig(tenantId?: string, appId?: string):
     appName: config.app?.name,
     isInherited,
     inheritedFrom,
+  };
+}
+
+/**
+ * Activate a global SMTP configuration (deactivates all others)
+ * Only superadmins can activate global configurations
+ */
+export async function activateGlobalSmtpConfig(
+  configId: string, 
+  userContext: { roles: string[], tenantId?: string, sub: string } | null
+): Promise<{ success: boolean, message: string, activeConfig?: SmtpConfigOutput }> {
+  if (isPrismaDisabled()) {
+    throw new Error('SMTP configuration management requires database access');
+  }
+
+  const prisma = getPrisma();
+  const isSuperAdmin = !userContext || userContext.roles.includes('superadmin');
+
+  if (!isSuperAdmin) {
+    throw new Error('Only superadmins can activate global SMTP configurations');
+  }
+
+  // Check if the config exists and is global scope
+  const config = await prisma.smtpConfig.findUnique({
+    where: { id: configId },
+    include: { tenant: true, app: true }
+  });
+
+  if (!config) {
+    throw new Error('SMTP configuration not found');
+  }
+
+  if (config.scope !== 'GLOBAL') {
+    throw new Error('Only global SMTP configurations can be activated/deactivated');
+  }
+
+  if (config.isActive) {
+    return {
+      success: true,
+      message: 'Configuration is already active',
+      activeConfig: {
+        id: config.id,
+        scope: config.scope as 'GLOBAL' | 'TENANT' | 'APP',
+        tenantId: config.tenantId || undefined,
+        appId: config.appId || undefined,
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        user: config.user || undefined,
+        pass: config.pass ? maskSensitiveField(config.pass) : undefined,
+        fromAddress: config.fromAddress || undefined,
+        fromName: config.fromName || undefined,
+        service: config.service,
+        awsRegion: config.awsRegion || undefined,
+        awsAccessKey: config.awsAccessKey ? maskSensitiveField(config.awsAccessKey) : undefined,
+        awsSecretKey: config.awsSecretKey ? maskSensitiveField(config.awsSecretKey) : undefined,
+        isActive: config.isActive,
+        createdAt: config.createdAt,
+        updatedAt: config.updatedAt,
+        createdBy: config.createdBy || undefined,
+        tenantName: config.tenant?.name,
+        appName: config.app?.name,
+      }
+    };
+  }
+
+  // Use a transaction to ensure atomicity
+  await prisma.$transaction(async (tx) => {
+    // First, deactivate all other global configs
+    await tx.smtpConfig.updateMany({
+      where: { 
+        scope: 'GLOBAL',
+        isActive: true
+      },
+      data: { isActive: false }
+    });
+
+    // Then activate the selected config
+    await tx.smtpConfig.update({
+      where: { id: configId },
+      data: { isActive: true }
+    });
+  });
+
+  // Fetch the updated config to return
+  const updatedConfig = await prisma.smtpConfig.findUnique({
+    where: { id: configId },
+    include: { tenant: true, app: true }
+  });
+
+  return {
+    success: true,
+    message: 'Global SMTP configuration activated successfully',
+    activeConfig: updatedConfig ? {
+      id: updatedConfig.id,
+      scope: updatedConfig.scope as 'GLOBAL' | 'TENANT' | 'APP',
+      tenantId: updatedConfig.tenantId || undefined,
+      appId: updatedConfig.appId || undefined,
+      host: updatedConfig.host,
+      port: updatedConfig.port,
+      secure: updatedConfig.secure,
+      user: updatedConfig.user || undefined,
+      pass: updatedConfig.pass ? maskSensitiveField(updatedConfig.pass) : undefined,
+      fromAddress: updatedConfig.fromAddress || undefined,
+      fromName: updatedConfig.fromName || undefined,
+      service: updatedConfig.service,
+      awsRegion: updatedConfig.awsRegion || undefined,
+      awsAccessKey: updatedConfig.awsAccessKey ? maskSensitiveField(updatedConfig.awsAccessKey) : undefined,
+      awsSecretKey: updatedConfig.awsSecretKey ? maskSensitiveField(updatedConfig.awsSecretKey) : undefined,
+      isActive: updatedConfig.isActive,
+      createdAt: updatedConfig.createdAt,
+      updatedAt: updatedConfig.updatedAt,
+      createdBy: updatedConfig.createdBy || undefined,
+      tenantName: updatedConfig.tenant?.name,
+      appName: updatedConfig.app?.name,
+    } : undefined
   };
 }

@@ -11,14 +11,22 @@
     <header>
       <h1 id="viewTitle">Mail Service</h1>
       <nav class="topnav">
-        <button data-view="tenants" class="navBtn">Tenants</button>
+        <button data-view="tenants" class="navBtn" id="tenantsNavBtn" style="display:none">Tenants</button>
+        <button data-view="apps" class="navBtn" id="appsNavBtn" style="display:none">Apps</button>
         <button data-view="compose" class="navBtn">Compose</button>
-        <button data-view="smtp-config" class="navBtn">SMTP Config</button>
+        <button data-view="smtp-config" class="navBtn">Config</button>
       </nav>
       <div class="env" id="envInfo"></div>
+      <div id="roleContext" style="background: #2a2a2a; padding: 8px; margin: 4px 0; border: 1px solid #555; border-radius: 4px; display: none;">
+        <div id="roleContextInfo" style="font-size: 0.9em; color: #ccc; margin-bottom: 8px;"></div>
+        <div id="roleContextActions" style="display: flex; gap: 8px; align-items: center;">
+          <button id="switchContextBtn" class="smallBtn" style="display:none">Switch Context</button>
+          <button id="returnSuperadminBtn" class="smallBtn" style="display:none">Return to Superadmin</button>
+        </div>
+      </div>
       <div class="userPane" id="userPane" style="display:none">
         <span id="userSummary"></span>
-        <button id="logoutBtn" class="smallBtn" type="button">Logout</button>
+        <button id="logoutBtn" class="smallBtn" type="button" style="background: #dc3545; border: 1px solid #dc3545; color: white; margin-left: 10px;" title="Logout and clear session">🚪 Logout</button>
       </div>
     </header>
     <main class="layout" id="view-tenants" style="display:none">
@@ -30,6 +38,31 @@
           <div class="status" id="tenantStatus"></div>
         </form>
         <div id="tenantList"></div>
+      </section>
+    </main>
+    <main class="layout" id="view-apps" style="display:none">
+      <section class="panel fullwidth">
+        <h2>Application Management</h2>
+        <div id="appContextInfo" style="background: #2a2a2a; padding: 12px; margin-bottom: 15px; border: 1px solid #555; border-radius: 4px;">
+          <div id="appTenantContext" style="color: #ccc; font-size: 0.9em;"></div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <button type="button" id="createAppBtn" class="config-btn config-btn-primary">+ Create Application</button>
+        </div>
+        
+        <form id="appForm" style="margin-bottom: 20px; display: none;">
+          <div class="grid" style="grid-template-columns: 1fr auto auto; gap: 10px; align-items: end;">
+            <label>App Name <input name="appName" placeholder="My Application" required /></label>
+            <button type="submit">Create Application</button>
+            <button type="button" id="cancelAppBtn" class="config-btn config-btn-secondary">Cancel</button>
+          </div>
+          <div class="status" id="appFormStatus"></div>
+        </form>
+        
+        <div id="appsList" style="margin-top: 20px;">
+          <div class="loading">Loading applications...</div>
+        </div>
       </section>
     </main>
     <main class="layout" id="view-compose">
@@ -127,38 +160,49 @@
       </section>
     </main>
     <main class="layout" id="view-smtp-config" style="display:none">
-      <section class="panel fullwidth" id="roleSimulator" style="background: #2a2a2a; border: 1px solid #555; margin-bottom: 15px;">
-        <h3 style="margin-top: 0; color: #ffa500;">Role Simulator (Testing Only)</h3>
-        <div class="grid" style="grid-template-columns: auto auto auto auto; gap: 15px; align-items: center;">
-          <label>Role:
-            <select id="roleSelect" style="width: 150px;">
-              <option value="super-admin">Super Admin</option>
-              <option value="tenant-admin">Tenant Admin</option>
-              <option value="app-user">App User</option>
-            </select>
-          </label>
-          <label id="tenantSelectLabel" style="visibility: hidden;">Tenant:
-            <select id="roleTenantSelect" style="width: 200px;">
-              <option value="">Select Tenant...</option>
-            </select>
-          </label>
-          <label id="appSelectLabel" style="visibility: hidden;">App:
-            <select id="roleAppSelect" style="width: 200px;">
-              <option value="">Select App...</option>
-            </select>
-          </label>
-          <button type="button" id="applyRoleBtn" class="config-btn">Apply Role</button>
+      <!-- Role Context Indicator -->
+      <section class="panel fullwidth" id="roleContextIndicator" style="background: #2a2a2a; border: 1px solid #555; margin-bottom: 15px; display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <span style="color: #81c784; font-weight: bold;">📋 Tenant Context:</span>
+            <span id="contextTenantName" style="color: #fff; margin-left: 8px;"></span>
+          </div>
+          <button id="exitContextBtn" class="config-btn config-btn-secondary">← Back to Superadmin</button>
         </div>
-        <div id="roleStatus" style="margin-top: 10px; font-size: 0.9em; color: #ccc;"></div>
+      </section>
+
+      <!-- Global Configuration Management -->
+      <section class="panel fullwidth" id="globalConfigSection">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+          <h2 style="margin: 0; color: #4fc3f7;">🌐 Global SMTP Configurations</h2>
+          <button id="addGlobalConfigBtn" class="config-btn config-btn-primary">+ Add Global Config</button>
+        </div>
+        
+        <div id="globalConfigCards" style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px;">
+          <!-- Global config cards will be populated here -->
+        </div>
+        
+        <div id="noGlobalConfigs" style="display: none; text-align: center; padding: 32px; color: #888; border: 2px dashed #444; border-radius: 8px;">
+          <div style="font-size: 2rem; margin-bottom: 8px;">📧</div>
+          <p style="margin: 0; font-size: 1.1rem; font-weight: bold;">No global SMTP configurations yet</p>
+          <p style="margin: 8px 0 0 0; font-size: 0.9rem;">Global configs provide fallback email service for all tenants</p>
+        </div>
       </section>
       
-      <section class="panel fullwidth">
-        <h2>SMTP Configuration Hierarchy</h2>
-        <div id="smtpTree" style="margin-bottom: 20px;">
+      <!-- Tenant Overview Section -->
+      <section class="panel fullwidth" id="tenantOverviewSection">
+        <h2 style="margin: 0 0 16px 0; color: #81c784;">🏢 Tenant Configuration Overview</h2>
+        <div id="smtpTree" style="font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre; background: #1a1a1a; padding: 16px; border-radius: 6px; border: 1px solid #333;">
           <div class="tree-loading">Loading configuration tree...</div>
         </div>
+        
+        <div style="margin-top: 12px; font-size: 0.9rem; color: #999; display: flex; align-items: center; gap: 8px;">
+          <span>💡</span>
+          <span><strong>Tip:</strong> Click on any tenant name to switch context and manage their specific configuration</span>
+        </div>
       </section>
-      
+
+      <!-- Legacy Config Editor (hidden, for backward compatibility) -->
       <section class="panel fullwidth" id="smtpConfigEditor" style="display:none">
         <h2 id="configEditorTitle">Configuration Editor</h2>
         <div class="config-actions" style="margin-bottom: 15px;">
@@ -167,7 +211,6 @@
           <button type="button" id="addAppBtn" class="config-btn" style="display:none">Add App Config</button>
           <button type="button" id="cancelEditBtn" class="config-btn config-btn-secondary">Cancel</button>
         </div>
-        <h2>Manage Configurations</h2>
         
         <form id="smtpConfigForm">
           <input type="hidden" name="scope" id="configScope" />
@@ -178,7 +221,39 @@
             <legend>Service Configuration</legend>
             <div class="grid">
               <label>Service Type
-                <select name="service" id="serviceSelect">
+                <select name="service" id="smtpServiceSelect">
+                  <option value="smtp">SMTP</option>
+                  <option value="ses">Amazon SES</option>
+                </select>
+              </label>
+            </div>
+            <button type="submit" id="saveConfigBtn">Save Configuration</button>
+            <button type="button" id="deleteConfigBtn" class="config-btn config-btn-danger" style="display:none">Delete</button>
+            <button type="button" id="testConfigBtn" class="config-btn config-btn-secondary">Test Configuration</button>
+          </fieldset>
+          
+          <div class="status" id="smtpConfigStatus"></div>
+        </form>
+      </section>
+    </main>
+    
+    <!-- Global Configuration Modal -->
+    <div id="globalConfigModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
+      <div style="background: #1e1e1e; padding: 24px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+          <h2 id="globalConfigModalTitle" style="margin: 0;">Add Global SMTP Configuration</h2>
+          <button id="closeGlobalConfigModal" style="background: transparent; border: none; color: #999; font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+        </div>
+        
+        <form id="globalConfigForm">
+          <input type="hidden" name="scope" value="GLOBAL" />
+          <input type="hidden" name="configId" id="globalConfigId" />
+          
+          <fieldset>
+            <legend>Service Configuration</legend>
+            <div class="grid">
+              <label>Service Type
+                <select name="service" id="globalServiceSelect">
                   <option value="smtp">SMTP</option>
                   <option value="ses">Amazon SES</option>
                 </select>
@@ -186,7 +261,7 @@
             </div>
             
             <!-- SMTP-specific fields -->
-            <div id="smtpFields">
+            <div id="globalSmtpFields">
               <div class="grid">
                 <label>Host <input name="host" placeholder="smtp.example.com" /></label>
                 <label>Port <input name="port" type="number" value="587" /></label>
@@ -201,7 +276,7 @@
             </div>
             
             <!-- SES-specific fields -->
-            <div id="sesFields" style="display:none">
+            <div id="globalSesFields" style="display:none">
               <div class="grid">
                 <label>AWS Region <input name="awsRegion" placeholder="us-east-1" /></label>
                 <label>AWS Access Key <input name="awsAccessKey" placeholder="AKIA..." /></label>
@@ -216,17 +291,122 @@
             </div>
           </fieldset>
           
-          <div class="config-form-actions" style="margin-top: 15px;">
-            <button type="submit" id="saveConfigBtn">Save Configuration</button>
-            <button type="button" id="deleteConfigBtn" class="config-btn config-btn-danger" style="display:none">Delete</button>
-            <button type="button" id="testConfigBtn" class="config-btn config-btn-secondary">Test Configuration</button>
+          <div class="config-form-actions" style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="submit" id="saveGlobalConfigBtn">Save Configuration</button>
+            <button type="button" id="testGlobalConfigBtn" class="config-btn config-btn-secondary">Test Configuration</button>
+            <button type="button" id="cancelGlobalConfigBtn" class="config-btn config-btn-secondary">Cancel</button>
+            <button type="button" id="deleteGlobalConfigBtn" class="config-btn config-btn-danger" style="display: none; margin-left: auto;">Delete Configuration</button>
           </div>
           
-          <div class="status" id="smtpConfigStatus"></div>
+          <div class="status" id="globalConfigStatus" style="margin-top: 12px;"></div>
         </form>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
+  <div id="contextSwitchOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000">
+    <div style="background:#1e1e1e;padding:24px;max-width:500px;width:100%;border:1px solid #444;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);">
+      <h2 style="margin-top:0">Switch Context</h2>
+      <p style="font-size:.9rem;line-height:1.3;color:#ccc">As a superadmin, you can switch to view the system from a specific tenant's perspective. This allows you to see and manage what a tenant admin would see.</p>
+      
+      <form id="contextSwitchForm">
+        <label style="display:block;margin-bottom:16px">Select Tenant:
+          <select name="contextTenantId" id="contextTenantSelect" style="width:100%;margin-top:4px" required>
+            <option value="">-- Select Tenant --</option>
+          </select>
+        </label>
+        
+        <div style="display:flex;gap:8px;align-items:center;margin-top:16px">
+          <button type="submit">Switch to Tenant Context</button>
+          <button type="button" id="contextSwitchCancelBtn" class="smallBtn">Cancel</button>
+          <span id="contextSwitchStatus" class="status" style="flex:1;text-align:right"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- App SMTP Configuration Modal -->
+  <div id="appConfigModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: #1e1e1e; padding: 24px; max-width: 600px; width: 100%; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 id="appConfigModalTitle" style="margin: 0;">Configure App SMTP</h2>
+        <button id="closeAppConfigModal" style="background: transparent; border: none; color: #999; font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+      </div>
+      
+      <form id="appConfigForm" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="background: #2a2a2a; padding: 12px; border-radius: 4px; margin-bottom: 16px;">
+          <div style="font-weight: bold; color: #4CAF50;" id="appConfigAppName">App Name</div>
+          <div style="font-size: 0.85em; color: #888; font-family: monospace;" id="appConfigAppId">App ID: app-123</div>
+        </div>
+        
+        <label>
+          Service Type
+          <select id="appServiceSelect" name="service" required>
+            <option value="smtp">SMTP</option>
+            <option value="ses">Amazon SES</option>
+          </select>
+        </label>
+        
+        <div id="appSmtpFields">
+          <label>
+            SMTP Host
+            <input type="text" name="host" placeholder="smtp.example.com" required>
+          </label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <label>
+              Port
+              <input type="number" name="port" placeholder="587" required>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; margin-top: 20px;">
+              <input type="checkbox" name="secure">
+              Use SSL/TLS
+            </label>
+          </div>
+          <label>
+            Username
+            <input type="text" name="user" placeholder="your-username">
+          </label>
+          <label>
+            Password
+            <input type="password" name="pass" placeholder="your-password">
+          </label>
+        </div>
+        
+        <div id="appSesFields" style="display: none;">
+          <label>
+            AWS Access Key
+            <input type="text" name="awsAccessKey" placeholder="AKIA...">
+          </label>
+          <label>
+            AWS Secret Key
+            <input type="password" name="awsSecretKey" placeholder="secret-key">
+          </label>
+          <label>
+            AWS Region
+            <input type="text" name="awsRegion" placeholder="us-east-1" value="us-east-1">
+          </label>
+        </div>
+        
+        <label>
+          From Address
+          <input type="email" name="fromAddress" placeholder="noreply@example.com" required>
+        </label>
+        <label>
+          From Name
+          <input type="text" name="fromName" placeholder="My Application">
+        </label>
+        
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+          <button type="submit" id="saveAppConfigBtn">Save Configuration</button>
+          <button type="button" id="testAppConfigBtn" class="smallBtn">Test Configuration</button>
+          <button type="button" id="deleteAppConfigBtn" class="smallBtn" style="background: #dc3545; border-color: #dc3545; display: none;">Delete Configuration</button>
+          <button type="button" id="cancelAppConfigBtn" class="smallBtn">Cancel</button>
+        </div>
+        
+        <div id="appConfigStatus" class="status"></div>
+      </form>
+    </div>
+  </div>
+  
   <div id="loginOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000">
     <div style="background:#1e1e1e;padding:24px;max-width:480px;width:100%;border:1px solid #444;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);">
       <h2 style="margin-top:0">Authenticate</h2>
@@ -244,6 +424,10 @@
       <details style="margin-top:12px">
         <summary style="cursor:pointer">Dev Helper</summary>
         <p style="font-size:.8rem">If you generated a local key, mint a token in another terminal:<br/><code>npm run token -- --roles superadmin</code></p>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="loginAsSuperAdmin" class="smallBtn" style="background:#0d47a1; border:1px solid #1976d2;">Login as SuperAdmin</button>
+          <button type="button" id="loginAsTenantAdmin" class="smallBtn" style="background:#1b5e20; border:1px solid #4caf50;">Login as Tenant Admin</button>
+        </div>
       </details>
     </div>
   </div>

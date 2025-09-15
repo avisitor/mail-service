@@ -6,6 +6,7 @@
 
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
 
 // Read configuration
 import dotenv from 'dotenv';
@@ -33,16 +34,17 @@ function generateDevToken(claims = {}) {
     iat: Math.floor(Date.now() / 1000),
     roles: ['superadmin'],
     tenantId: 'dev-tenant-123',
-    appId: 'dev-app-123',
+    appId: 'cmfka688r0001b77ofpgm57ix', // ReTree Hawaii app ID
     ...claims
   };
 
-  // For development, we'll use the symmetric secret instead of RSA
-  // This is simpler and works for local development
-  return jwt.sign(defaultClaims, config.secret, {
-    algorithm: 'HS256',
+  // Use real IDP RSA key for realistic testing
+  const privateKey = fs.readFileSync('keys/private-6ca1a309a735fb83.pem', 'utf8');
+  
+  return jwt.sign(defaultClaims, privateKey, {
+    algorithm: 'RS256',
     header: {
-      kid: 'dev-key-1'
+      kid: '6ca1a309a735fb83' // Real IDP key ID
     }
   });
 }
@@ -55,11 +57,12 @@ function generateSuperAdminToken() {
   });
 }
 
-function generateTenantAdminToken(tenantId = 'dev-tenant-123') {
+function generateTenantAdminToken(tenantId = 'test-tenant-1') {
   return generateDevToken({
     sub: `tenant-admin-${tenantId}`,
-    roles: ['tenant-admin'],
-    tenantId
+    roles: ['tenant_admin'],
+    tenantId,
+    appId: 'cmfka688r0001b77ofpgm57ix' // ReTree Hawaii app ID
   });
 }
 

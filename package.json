@@ -6,11 +6,17 @@
   "scripts": {
     "dev": "PORT=3100 NODE_ENV=development nodemon --watch src --ext ts,js,json --signal SIGTERM --exec \"node --loader ts-node/esm src/server.ts\"",
     "dev:esm": "NODE_ENV=development node --loader ts-node/esm src/server.ts",
+    "dev:frontend": "tsc --watch --preserveWatchOutput --project tsconfig.json & nodemon --watch dist/src/frontend/main.js --exec 'node scripts/copy-frontend.cjs'",
     "build": "tsc -p tsconfig.json",
-    "postbuild": "mkdir -p dist/src/frontend && cp -f src/frontend/index.html src/frontend/styles.css dist/src/frontend/ 2>/dev/null || true",
+    "postbuild": "npm run build:frontend",
+    "build:frontend": "mkdir -p dist/src/frontend && cp -f src/frontend/index.html src/frontend/styles.css dist/src/frontend/ && node scripts/copy-frontend.cjs",
+    "copy:frontend": "node scripts/copy-frontend.cjs",
     "start": "node dist/src/server.js",
     "lint": "eslint . --ext .ts",
     "lint:js": "eslint src/frontend/*.js",
+    "validate:html": "node scripts/validate-html.cjs",
+    "validate:ts": "tsc --noEmit",
+    "validate": "npm run validate:ts && npm run validate:html",
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
@@ -35,6 +41,7 @@
     "nodemailer": "^6.9.13",
     "nodemon": "^3.1.10",
     "pino": "^9.0.0",
+    "puppeteer": "^24.20.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
