@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config, flags } from '../src/config.js';
 import { scheduleGroup, workerTick, createGroup, ingestRecipients } from '../src/modules/groups/service.js';
 import { createTemplate } from '../src/modules/templates/service.js';
+import { getPrisma } from '../src/db/prisma.js';
+import { markDbReady } from '../src/db/state.js';
 
 flags.disableAuth = true as any;
 const dbValid = (config.databaseUrl || '').startsWith('mysql://');
@@ -12,10 +14,114 @@ describe('worker', () => {
     it.skip('skipped because DATABASE_URL is not mysql://', () => {});
     return;
   }
+  
+  // Track created entities for cleanup
+  const createdEntities = {
+    tenants: new Set<string>(),
+    apps: new Set<string>(),
+    smtpConfigs: new Set<string>(),
+    messageGroups: new Set<string>(),
+    templates: new Set<string>()
+  };
+  
+  afterEach(async () => {
+    // Clean up all created test entities
+    const prisma = getPrisma();
+    try {
+      // Delete in reverse dependency order
+      for (const id of createdEntities.messageGroups) {
+        await prisma.messageGroup.deleteMany({ where: { id } }).catch(() => {});
+      }
+      for (const id of createdEntities.templates) {
+        await prisma.template.deleteMany({ where: { id } }).catch(() => {});
+      }
+      for (const id of createdEntities.smtpConfigs) {
+        await prisma.smtpConfig.deleteMany({ where: { id } }).catch(() => {});
+      }
+      for (const id of createdEntities.apps) {
+        await prisma.app.deleteMany({ where: { id } }).catch(() => {});
+      }
+      for (const id of createdEntities.tenants) {
+        await prisma.tenant.deleteMany({ where: { id } }).catch(() => {});
+      }
+      
+      // Clear tracking sets
+      createdEntities.tenants.clear();
+      createdEntities.apps.clear();
+      createdEntities.smtpConfigs.clear();
+      createdEntities.messageGroups.clear();
+      createdEntities.templates.clear();
+    } catch (error) {
+      console.warn('Worker test cleanup error:', error);
+    }
+  });
+  
+  beforeEach(async () => {
+    // Create unique test data for each test run
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(7);
+    const uniqueId = `${timestamp}-${random}`;
+    
+    // Ensure tenant and app exist for tests
+    const prisma = getPrisma();
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: `Worker Test Tenant ${uniqueId}`
+      }
+    });
+    createdEntities.tenants.add(tenant.id);
+    
+    const app = await prisma.app.create({
+      data: {
+        tenantId: tenant.id,
+        name: `Worker Test App ${uniqueId}`,
+        clientId: `test-client-worker-${uniqueId}`
+      }
+    });
+    createdEntities.apps.add(app.id);
+    
+    // Add SMTP configuration for worker test tenant
+    const smtpConfig = await prisma.smtpConfig.create({
+      data: {
+        scope: 'TENANT',
+        tenantId: tenant.id,
+        host: 'localhost',
+        port: 1025,
+        secure: false,
+        fromAddress: `worker-test-${uniqueId}@localhost.local`,
+        fromName: `Worker Test ${uniqueId}`,
+        service: 'smtp',
+        isActive: true,
+        createdBy: 'test'
+      }
+    });
+    createdEntities.smtpConfigs.add(smtpConfig.id);
+    
+    // Mark database as ready for worker tick
+    markDbReady();
+  });
+
   it('renders pending recipients for scheduled group', async () => {
     buildApp(); // initialize plugins
-    const tpl = await createTemplate({ tenantId: 'tenant1', name: 'welcome', version: 1, subject: 'Hi {{name}}', bodyHtml: '<p>Hi {{name}}</p>', variables: {} });
-    const grp: any = await createGroup({ tenantId: 'tenant1', appId: 'app1', templateId: tpl.id, subject: 'Fallback' });
+    // Use unique template name to avoid constraint conflicts across test runs
+    const uniqueName = `welcome-${Date.now()}`;
+    
+    // Get the created tenant and app IDs
+    const prisma = getPrisma();
+    const tenant = await prisma.tenant.findFirst({ 
+      where: { name: { contains: 'Worker Test Tenant' } },
+      orderBy: { createdAt: 'desc' }
+    });
+    const app = await prisma.app.findFirst({ 
+      where: { name: { contains: 'Worker Test App' } },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    const tpl = await createTemplate({ tenantId: tenant!.id, name: uniqueName, version: 1, subject: 'Hi {{name}}', bodyHtml: '<p>Hi {{name}}</p>', variables: {} });
+    createdEntities.templates.add(tpl.id);
+    
+    const grp: any = await createGroup({ tenantId: tenant!.id, appId: app!.id, templateId: tpl.id, subject: 'Fallback' });
+    createdEntities.messageGroups.add(grp.id);
     await ingestRecipients(grp.id, { recipients: [
       { email: 'a@example.com', context: { name: 'A'} },
       { email: 'b@example.com', context: { name: 'B'} }
