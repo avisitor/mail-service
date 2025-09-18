@@ -1,18 +1,12 @@
 import { z } from 'zod';
 
 export const templateCreateSchema = z.object({
-  tenantId: z.string(),
   appId: z.string(),
-  name: z.string().min(1),
-  version: z.number().int().positive(),
+  title: z.string().min(1),
+  content: z.string().min(1),
   subject: z.string().min(1),
-  bodyHtml: z.string().min(1),
-  bodyText: z.string().optional(),
-  variables: z.record(z.string(), z.any()).default({}),
+  version: z.number().int().positive(),
   isActive: z.boolean().optional(),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  content: z.string().optional(),
 });
 
 export const templateUpdateSchema = templateCreateSchema.partial().extend({ id: z.string() });

@@ -7,7 +7,20 @@ declare global {
     }
 }
 
-interface TemplateRecord { id:string; tenantId:string; name:string; version:number; subject:string; bodyHtml:string; bodyText?:string; }
+interface TemplateRecord { 
+  id: string; 
+  appId: string; 
+  title: string; 
+  content: string;
+  subject: string;
+  version: number; 
+  isActive: boolean;
+  // Computed properties for backward compatibility
+  name?: string;
+  description?: string;
+  bodyHtml?: string;
+  bodyText?: string;
+}
 interface Tenant { id:string; name:string; status?:string; }
 interface AppRec { id:string; tenantId:string; name:string; clientId:string; }
 
@@ -123,9 +136,12 @@ async function loadTemplate(id: string) {
   (document.querySelector('#templateForm [name=name]') as HTMLInputElement).value = tpl.name;
   (document.querySelector('#templateForm [name=version]') as HTMLInputElement).value = String(tpl.version);
   (document.querySelector('#templateForm [name=subject]') as HTMLInputElement).value = tpl.subject;
-  (document.querySelector('#templateForm [name=bodyHtml]') as HTMLTextAreaElement).value = tpl.bodyHtml;
-  (document.querySelector('#templateForm [name=bodyText]') as HTMLTextAreaElement).value = tpl.bodyText || '';
-  (document.querySelector('#templateForm [name=variables]') as HTMLTextAreaElement).value = JSON.stringify(tpl.variables||{}, null, 2);
+  (document.querySelector('#templateForm [name=title]') as HTMLInputElement).value = tpl.title;
+  (document.querySelector('#templateForm [name=subject]') as HTMLInputElement).value = tpl.subject;
+  (document.querySelector('#templateForm [name=content]') as HTMLTextAreaElement).value = tpl.content;
+  // Computed fields for display only
+  const name = tpl.title; // name is just the title
+  const description = `Template: ${tpl.title}`; // description is computed
   updateEnvInfo();
 }
 
@@ -137,18 +153,13 @@ if (templateForm) {
     const form = e.target as HTMLFormElement;
     const fd = new FormData(form);
     const payload: any = {
-      tenantId,
-    name: fd.get('name') as string,
-    version: Number(fd.get('version')),
-    subject: fd.get('subject'),
-    bodyHtml: fd.get('bodyHtml'),
-    bodyText: fd.get('bodyText') || undefined,
-    variables: {}
-  };
-  const varsRaw = fd.get('variables') as string;
-  if (varsRaw?.trim()) {
-    try { payload.variables = JSON.parse(varsRaw); } catch { showStatusMessage($('#templateStatus') as HTMLElement, 'Invalid JSON in variables'); flashInvalid(document.querySelector('#templateForm [name=variables]') as HTMLElement); return; }
-  }
+      appId: 'cmfka688r0001b77ofpgm57ix', // Use ReTree Hawaii app ID
+      title: fd.get('title') as string,
+      version: Number(fd.get('version')),
+      subject: fd.get('subject'),
+      content: fd.get('content'),
+      isActive: fd.get('isActive') !== 'off'
+    };
   const btn = form.querySelector('button[type=submit]') as HTMLButtonElement;
   btn.disabled = true;
   try {
@@ -3823,9 +3834,10 @@ function populateTemplateDropdown(templates: any[]) {
     templates.forEach(template => {
         const option = document.createElement('option');
         option.value = template.id;
-        option.textContent = template.title || template.name || 'Untitled Template';
-        if (template.description) {
-            option.textContent += ` - ${template.description}`;
+        option.textContent = template.title || 'Untitled Template';
+        // Add version info as description
+        if (template.version) {
+            option.textContent += ` (v${template.version})`;
         }
         select.appendChild(option);
     });
@@ -3963,7 +3975,7 @@ async function loadTemplateContent(templateId: string) {
         ($('#subject') as HTMLInputElement).value = template.subject || '';
         
         // Load content into the rich text editor
-        const content = template.content || template.bodyHtml || '';
+        const content = template.content || '';
         loadContentIntoEditor(content, 'Template');
         
         console.log('[Compose] Loaded template content', templateId);

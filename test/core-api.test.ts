@@ -388,7 +388,7 @@ describe('Mail Service Core API', () => {
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.payload);
       expect(data.groupId).toBeDefined();
-      expect(data.scheduled).toBe(true);
+      expect(data.scheduled).toBe(false); // No scheduleAt provided, so should be immediate (not scheduled)
     });
 
     it('should reject request with missing required fields', async () => {

@@ -673,11 +673,11 @@ export function buildApp() {
           return reply.badRequest(`Template '${templateId}' not found or not active`);
         }
         
-        console.log('[/send-now] Found template:', { id: template.id, name: template.name, subject: template.subject });
+        console.log('[/send-now] Found template:', { id: template.id, title: template.title, subject: template.subject });
         
         // Decode HTML entities that were incorrectly encoded when stored in database
         const { decode } = await import('html-entities');
-        const decodedHtml = template.bodyHtml ? decode(template.bodyHtml) : '';
+        const decodedHtml = template.content ? decode(template.content) : '';
         
         // Use template content (subject/html from request override template if provided)
         finalSubject = subject || template.subject || 'No Subject';

@@ -42,6 +42,31 @@ describe('JWT Field Extraction Debug', () => {
 
   beforeEach(async () => {
     app = buildApp();
+    
+    // Create test tenant and app records for the hardcoded IDs
+    const { getPrisma } = await import('../src/db/prisma.js');
+    const prisma = getPrisma();
+    
+    try {
+      await prisma.tenant.upsert({
+        where: { id: REAL_TENANT_ID },
+        update: {},
+        create: { id: REAL_TENANT_ID, name: 'Test Tenant for JWT' }
+      });
+      
+      await prisma.app.upsert({
+        where: { id: REAL_APP_ID },
+        update: {},
+        create: { 
+          id: REAL_APP_ID, 
+          tenantId: REAL_TENANT_ID, 
+          name: 'Test App for JWT', 
+          clientId: 'test-app-jwt' 
+        }
+      });
+    } catch (error) {
+      console.log('Error setting up test data:', error);
+    }
   });
 
   it('should extract JWT fields correctly', async () => {

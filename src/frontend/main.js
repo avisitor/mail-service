@@ -107,9 +107,12 @@ async function loadTemplate(id) {
     document.querySelector('#templateForm [name=name]').value = tpl.name;
     document.querySelector('#templateForm [name=version]').value = String(tpl.version);
     document.querySelector('#templateForm [name=subject]').value = tpl.subject;
-    document.querySelector('#templateForm [name=bodyHtml]').value = tpl.bodyHtml;
-    document.querySelector('#templateForm [name=bodyText]').value = tpl.bodyText || '';
-    document.querySelector('#templateForm [name=variables]').value = JSON.stringify(tpl.variables || {}, null, 2);
+    document.querySelector('#templateForm [name=title]').value = tpl.title;
+    document.querySelector('#templateForm [name=subject]').value = tpl.subject;
+    document.querySelector('#templateForm [name=content]').value = tpl.content;
+    // Computed fields for display only
+    const name = tpl.title; // name is just the title
+    const description = `Template: ${tpl.title}`; // description is computed
     updateEnvInfo();
 }
 // Template creation
@@ -120,25 +123,13 @@ if (templateForm) {
         const form = e.target;
         const fd = new FormData(form);
         const payload = {
-            tenantId,
-            name: fd.get('name'),
+            appId: 'cmfka688r0001b77ofpgm57ix', // Use ReTree Hawaii app ID
+            title: fd.get('title'),
             version: Number(fd.get('version')),
             subject: fd.get('subject'),
-            bodyHtml: fd.get('bodyHtml'),
-            bodyText: fd.get('bodyText') || undefined,
-            variables: {}
+            content: fd.get('content'),
+            isActive: fd.get('isActive') !== 'off'
         };
-        const varsRaw = fd.get('variables');
-        if (varsRaw?.trim()) {
-            try {
-                payload.variables = JSON.parse(varsRaw);
-            }
-            catch {
-                showStatusMessage($('#templateStatus'), 'Invalid JSON in variables');
-                flashInvalid(document.querySelector('#templateForm [name=variables]'));
-                return;
-            }
-        }
         const btn = form.querySelector('button[type=submit]');
         btn.disabled = true;
         try {
@@ -3566,9 +3557,10 @@ function populateTemplateDropdown(templates) {
     templates.forEach(template => {
         const option = document.createElement('option');
         option.value = template.id;
-        option.textContent = template.title || template.name || 'Untitled Template';
-        if (template.description) {
-            option.textContent += ` - ${template.description}`;
+        option.textContent = template.title || 'Untitled Template';
+        // Add version info as description
+        if (template.version) {
+            option.textContent += ` (v${template.version})`;
         }
         select.appendChild(option);
     });
@@ -3684,7 +3676,7 @@ async function loadTemplateContent(templateId) {
         // Populate form fields
         $('#subject').value = template.subject || '';
         // Load content into the rich text editor
-        const content = template.content || template.bodyHtml || '';
+        const content = template.content || '';
         loadContentIntoEditor(content, 'Template');
         console.log('[Compose] Loaded template content', templateId);
     }

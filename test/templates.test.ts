@@ -19,13 +19,11 @@ describe('templates (db)', () => {
       method: 'POST',
       url: '/templates',
       payload: {
-        tenantId: 'tenant_mem',
-        name: 'welcome',
-        version: 1,
-        subject: 'Hello {{name}}',
-        bodyHtml: '<p>Hi {{name}}</p>',
-        bodyText: 'Hi {{name}}',
-        variables: {},
+        appId: 'cmfka688r0001b77ofpgm57ix',
+        title: 'welcome',
+        subject: 'Hello ${name}',
+        content: '<p>Hi ${name}</p>',
+        version: 1
       }
     });
     expect(createRes.statusCode).toBe(201);

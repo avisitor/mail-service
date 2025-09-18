@@ -20,8 +20,6 @@ export async function registerComposeRoutes(app: FastifyInstance) {
       select: {
         id: true,
         title: true,
-        description: true,
-        name: true,
         subject: true,
         content: true,
         createdAt: true
@@ -42,11 +40,10 @@ export async function registerComposeRoutes(app: FastifyInstance) {
       select: {
         id: true,
         title: true,
-        description: true,
         subject: true,
         content: true,
-        bodyHtml: true,
-        bodyText: true
+        version: true,
+        isActive: true
       }
     });
     
