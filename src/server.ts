@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { config, flags } from './config.js';
-import { workerTick } from './modules/groups/service.js';
+import { workerTick } from './modules/worker/service.js';
 import { markDbReady } from './db/state.js';
 import { getPrisma, isPrismaDisabled } from './db/prisma.js';
 
@@ -54,8 +54,8 @@ async function main() {
         const handle = setInterval(async () => {
           try {
             const result = await workerTick();
-            if (result.groupsProcessed > 0) {
-              app.log.debug({ result }, 'worker tick processed groups');
+            if (result.jobsProcessed > 0) {
+              app.log.debug({ result }, 'worker tick processed jobs');
             }
           } catch (e: any) {
             workerErrorCount += 1;

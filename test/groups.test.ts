@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config, flags } from '../src/config.js';
+import { getPrisma } from '../src/db/prisma.js';
 
 flags.disableAuth = true as any;
 const dbValid = (config.databaseUrl || '').startsWith('mysql://');
@@ -10,6 +11,22 @@ describe('groups & recipients (db)', () => {
     it.skip('skipped because DATABASE_URL is not mysql://', () => {});
     return;
   }
+  
+  beforeEach(async () => {
+    // Ensure tenant and app exist for tests
+    const prisma = getPrisma();
+    await prisma.tenant.upsert({
+      where: { id: 'tenant-groups' },
+      update: {},
+      create: { id: 'tenant-groups', name: 'Groups Test Tenant' }
+    });
+    await prisma.app.upsert({
+      where: { id: 'app-groups' },
+      update: {},
+      create: { id: 'app-groups', tenantId: 'tenant-groups', name: 'Groups Test App', clientId: 'test-client-groups' }
+    });
+  });
+
   it('creates group and ingests recipients with dedupe', async () => {
     const app = buildApp();
 
@@ -17,8 +34,8 @@ describe('groups & recipients (db)', () => {
       method: 'POST',
       url: '/groups',
       payload: {
-        tenantId: 'tenant1',
-        appId: 'app1',
+        tenantId: 'tenant-groups',
+        appId: 'app-groups',
         subject: 'Welcome',
       }
     });

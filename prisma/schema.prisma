@@ -11,15 +11,14 @@ datasource db {
 }
 
 model Tenant {
-  id        String    @id @default(cuid())
-  name      String
-  status    String    @default("active")
-  createdAt DateTime  @default(now())
-  apps      App[]
-  templates Template[]
-  groups    MessageGroup[]
+  id           String         @id @default(cuid())
+  name         String
+  status       String         @default("active")
+  createdAt    DateTime       @default(now())
+  apps         App[]
+  MessageGroup MessageGroup[]
+  smtpConfigs  SmtpConfig[]
   suppressions Suppression[]
-  smtpConfigs SmtpConfig[]
 }
 
 model App {
@@ -34,20 +33,23 @@ model App {
 }
 
 model Template {
-  id          String   @id @default(cuid())
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  tenantId    String
-  name        String
-  version     Int
-  subject     String
-  bodyHtml    String
-  bodyText    String?
-  variables   Json
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  groups      MessageGroup[]
-  @@unique([tenantId, name, version])
+  id           String         @id @default(cuid())
+  appId        String         @default("retreehawaii")
+  name         String
+  title        String?        @db.VarChar(64)
+  description  String?        @db.VarChar(128)
+  content      String?        @db.Text
+  version      Int
+  subject      String?        @db.Text
+  bodyHtml     String?        @db.Text
+  bodyText     String?
+  variables    String         @db.LongText
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @default(now()) @updatedAt
+  MessageGroup MessageGroup[]
+
+  @@unique([appId, name, version])
 }
 
 model MessageGroup {
@@ -172,4 +174,53 @@ model SmtpConfig {
   // Multiple GLOBAL configs allowed, but only one should be active
   @@index([scope, tenantId, appId])
   @@index([scope, isActive]) // For efficient queries of active configs
+}
+
+model EmailJob {
+  id           String    @id @default(cuid())
+  jobId        String?   @unique @db.VarChar(20)
+  groupId      String?   @db.VarChar(20)
+  appId        String?
+  status       String?   @default("pending") @db.VarChar(20)
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  lastError    String?   @db.Text
+  attemptCount Int?      @default(0)
+  maxAttempts  Int?      @default(3)
+  subject      String?   @db.VarChar(128)
+  senderName   String?   @db.VarChar(64)
+  senderEmail  String?   @db.VarChar(64)
+  host         String?   @db.VarChar(64)
+  username     String?   @db.VarChar(64)
+  recipients   String?   @db.MediumText
+  message      String?   @db.MediumText
+  createdAt    DateTime? @default(now())
+  updatedAt    DateTime? @default(now()) @updatedAt
+
+  @@index([groupId])
+  @@index([appId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Maillog {
+  id          String    @id @default(cuid())
+  messageId   String?   @unique(map: "messageId") @db.VarChar(255)
+  groupId     String?   @db.VarChar(20)
+  appId       String?
+  sent        DateTime? @default(now()) @db.DateTime(0)
+  subject     String?   @db.VarChar(128)
+  senderName  String?   @db.VarChar(64)
+  senderEmail String?   @db.VarChar(64)
+  host        String?   @db.VarChar(64)
+  username    String?   @db.VarChar(64)
+  recipients  String?   @db.MediumText
+  message     String?   @db.MediumText
+  opened      DateTime?
+  createdAt   DateTime? @default(now())
+
+  @@index([groupId])
+  @@index([appId])
 }

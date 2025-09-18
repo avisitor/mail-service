@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Compose Elements Refactoring</title>
+</head>
+<body>
+    <h1>Test Compose Elements Refactoring</h1>
+    
+    <!-- Mock compose interface elements -->
+    <textarea id="recipients" placeholder="Recipients">test@example.com</textarea><br>
+    <input id="subject" type="text" value="Test Subject"><br>
+    <div id="message-content" contenteditable="true">Test Content</div><br>
+    <input id="fromAddress" type="text" value="sender@example.com"><br>
+    <select id="templateSelect">
+        <option value="">Select template</option>
+        <option value="1">Template 1</option>
+    </select><br>
+    <select id="previousMessageSelect">
+        <option value="">Select message</option>
+        <option value="1">Message 1</option>
+    </select><br>
+    <span id="addressCount">1</span> recipients<br>
+    <textarea id="messageContentHidden"></textarea>
+    
+    <hr>
+    
+    <button onclick="testGetFormData()">Test Get Form Data</button>
+    <button onclick="testSetFormData()">Test Set Form Data</button>
+    <button onclick="testClearForm()">Test Clear Form</button>
+    <button onclick="testSetContent()">Test Set Content</button>
+    
+    <div id="output"></div>
+    
+    <script src="dist/src/frontend/main.js"></script>
+    <script>
+        function log(message) {
+            document.getElementById('output').innerHTML += '<p>' + message + '</p>';
+        }
+        
+        function testGetFormData() {
+            try {
+                const data = ComposeElements.getFormData();
+                log('Get Form Data: ' + JSON.stringify(data));
+            } catch (e) {
+                log('Error getting form data: ' + e.message);
+            }
+        }
+        
+        function testSetFormData() {
+            try {
+                const testData = {
+                    recipients: 'new@example.com\nother@example.com',
+                    subject: 'New Subject',
+                    content: '<b>New Content</b>',
+                    fromAddress: 'new-sender@example.com',
+                    selectedTemplateId: '1',
+                    selectedPreviousMessageId: '1'
+                };
+                ComposeElements.setFormData(testData);
+                log('Set form data successfully');
+            } catch (e) {
+                log('Error setting form data: ' + e.message);
+            }
+        }
+        
+        function testClearForm() {
+            try {
+                ComposeElements.clearForm();
+                log('Cleared form successfully');
+            } catch (e) {
+                log('Error clearing form: ' + e.message);
+            }
+        }
+        
+        function testSetContent() {
+            try {
+                ComposeElements.setContent('<p>Test HTML content with &lt;entities&gt;</p>');
+                log('Set content successfully');
+            } catch (e) {
+                log('Error setting content: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

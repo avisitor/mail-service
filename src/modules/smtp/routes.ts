@@ -110,7 +110,7 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
       return reply.status(201).send(config);
     } catch (error: any) {
       app.log.error({ error }, 'Failed to create SMTP config');
-      if (error.message.includes('access') || error.message.includes('permission')) {
+      if (error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
         return reply.forbidden(error.message);
       }
       if (error.message.includes('already exists')) {
@@ -467,7 +467,7 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
       const { id } = req.params as { id: string };
       
       const result = await activateGlobalSmtpConfig(id, userContext);
-      return result;
+      return result.activeConfig; // Return the config directly, not the wrapper
     } catch (error: any) {
       app.log.error({ error }, 'Failed to activate SMTP config');
       if (error.message.includes('not found') || error.message.includes('access denied')) {

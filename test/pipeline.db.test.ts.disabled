@@ -40,7 +40,7 @@ d('pipeline db integration', () => {
     if (!RUN_DB) return;
     const tenant = await prisma.tenant.create({ data: { name: 'DB Tenant' } });
     const appRow = await prisma.app.create({ data: { name: 'DB App', tenantId: tenant.id, clientId: 'db-client' } });
-    const tpl = await createTemplate({ tenantId: tenant.id, name: 'greet', version: 1, subject: 'Hi {{n}}', bodyHtml: '<p>Hi {{n}}</p>', variables: {} });
+    const tpl = await createTemplate({ tenantId: tenant.id, appId: appRow.id, name: 'greet', version: 1, subject: 'Hi {{n}}', bodyHtml: '<p>Hi {{n}}</p>', variables: {} });
     const group: any = await createGroup({ tenantId: tenant.id, appId: appRow.id, templateId: tpl.id, subject: 'Fallback' });
     await ingestRecipients(group.id, { recipients: [ { email: 'a@db.test', context: { n: 'A'} }, { email: 'b@db.test', context: { n: 'B'} } ], dedupe: true, renderNow: false });
     await scheduleGroup(group.id);
@@ -66,7 +66,7 @@ d('pipeline db integration', () => {
     const tenant = await prisma.tenant.create({ data: { name: 'Suppr Tenant' } });
     const appRow = await prisma.app.create({ data: { name: 'Suppr App', tenantId: tenant.id, clientId: 'suppr-client' } });
     await prisma.suppression.create({ data: { tenantId: tenant.id, email: 'skip@db.test' } });
-    const tpl = await createTemplate({ tenantId: tenant.id, name: 'notice', version: 1, subject: 'Hi', bodyHtml: '<p>Hi</p>', variables: {} });
+    const tpl = await createTemplate({ tenantId: tenant.id, appId: appRow.id, name: 'notice', version: 1, subject: 'Hi', bodyHtml: '<p>Hi</p>', variables: {} });
     const group: any = await createGroup({ tenantId: tenant.id, appId: appRow.id, templateId: tpl.id, subject: 'Fallback' });
     await ingestRecipients(group.id, { recipients: [ { email: 'skip@db.test', context: {} }, { email: 'send@db.test', context: {} } ], dedupe: true, renderNow: false });
     await scheduleGroup(group.id);
@@ -85,7 +85,7 @@ d('pipeline db integration', () => {
   process.env.SMTP_DRY_RUN = 'false';
     const tenant = await prisma.tenant.create({ data: { name: 'Retry Tenant' } });
     const appRow = await prisma.app.create({ data: { name: 'Retry App', tenantId: tenant.id, clientId: 'retry-client' } });
-    const tpl = await createTemplate({ tenantId: tenant.id, name: 'fail', version: 1, subject: 'Hi', bodyHtml: '<p>Hi</p>', variables: {} });
+    const tpl = await createTemplate({ tenantId: tenant.id, appId: appRow.id, name: 'fail', version: 1, subject: 'Hi', bodyHtml: '<p>Hi</p>', variables: {} });
     const group: any = await createGroup({ tenantId: tenant.id, appId: appRow.id, templateId: tpl.id, subject: 'Fallback' });
     await ingestRecipients(group.id, { recipients: [ { email: 'perm@db.test', context: {} } ], dedupe: true, renderNow: false });
     await scheduleGroup(group.id);

@@ -123,6 +123,8 @@ export interface SendEmailInput {
   // Optional context for configuration resolution
   tenantId?: string;
   appId?: string;
+  // Flag to use test SMTP configuration instead of resolved config
+  testEmail?: boolean;
 }
 
 export async function sendEmail(input: SendEmailInput) {
@@ -135,22 +137,60 @@ export async function sendEmail(input: SendEmailInput) {
     throw new Error('Simulated permanent failure');
   }
   if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
-    return; // pretend success
+    return {
+      messageId: 'dry-run-' + Date.now(),
+      accepted: [input.to],
+      rejected: [],
+      response: 'Dry run mode - email not actually sent',
+      status: 'queued'
+    };
   }
 
-  const t = await getTransporterAsync(input.tenantId, input.appId);
-  const smtpConfig = await resolveSmtpConfig(input.appId);
+  let transporter: nodemailer.Transporter;
+  let fromAddr: string;
+  let fromName: string | undefined;
+
+  if (input.testEmail && config.testSmtp.enabled) {
+    // Use test SMTP configuration
+    transporter = nodemailer.createTransport({
+      host: config.testSmtp.host,
+      port: config.testSmtp.port,
+      secure: config.testSmtp.secure,
+      auth: (config.testSmtp.user && config.testSmtp.pass) ? {
+        user: config.testSmtp.user,
+        pass: config.testSmtp.pass
+      } : undefined,
+    });
+    
+    fromAddr = config.testSmtp.fromDefault;
+    fromName = config.testSmtp.fromName;
+  } else {
+    // Use resolved application/tenant SMTP configuration
+    transporter = await getTransporterAsync(input.tenantId, input.appId);
+    const smtpConfig = await resolveSmtpConfig(input.appId);
+    
+    fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user || '';
+    fromName = smtpConfig.fromName;
+  }
+
+  const from = fromName && fromAddr ? `${fromName} <${fromAddr}>` : fromAddr;
   
-  const fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user;
-  const from = smtpConfig.fromName && fromAddr ? `${smtpConfig.fromName} <${fromAddr}>` : fromAddr;
-  
-  await t.sendMail({
+  const result = await transporter.sendMail({
     from,
     to: input.to,
     subject: input.subject,
     html: input.html,
     text: input.text,
   });
+
+  // Return detailed delivery information
+  return {
+    messageId: result.messageId,
+    accepted: result.accepted || [],
+    rejected: result.rejected || [],
+    response: result.response || 'Email sent successfully',
+    status: (result.rejected && result.rejected.length > 0) ? 'partial_failure' : 'sent'
+  };
 }
 
 // Legacy function for backward compatibility - will be deprecated

@@ -117,7 +117,7 @@ describe('worker', () => {
       orderBy: { createdAt: 'desc' }
     });
     
-    const tpl = await createTemplate({ tenantId: tenant!.id, name: uniqueName, version: 1, subject: 'Hi {{name}}', bodyHtml: '<p>Hi {{name}}</p>', variables: {} });
+    const tpl = await createTemplate({ tenantId: tenant!.id, appId: app!.id, name: uniqueName, version: 1, subject: 'Hi {{name}}', bodyHtml: '<p>Hi {{name}}</p>', variables: {} });
     createdEntities.templates.add(tpl.id);
     
     const grp: any = await createGroup({ tenantId: tenant!.id, appId: app!.id, templateId: tpl.id, subject: 'Fallback' });

@@ -16,6 +16,52 @@ export interface Config {
   port: number;
   logLevel: string;
   databaseUrl: string;
+  internalJwtSecret: string;
+  tls?: {
+    keyFile?: string;
+    certFile?: string;
+    caFile?: string;
+  };
+  auth: {
+    issuer: string;
+    audience: string;
+    jwksUri: string;
+    roleClaim: string;
+    tenantClaim: string;
+    appClaim: string;
+    idpLoginUrl?: string;
+  };
+  smtp: {
+    host: string;
+    port: number;
+    user?: string;
+    pass?: string;
+    secure: boolean;
+    fromDefault?: string;
+    fromName?: string;
+  };
+  testSmtp: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    user?: string;
+    pass?: string;
+    secure: boolean;
+    fromDefault: string;
+    fromName: string;
+  };
+  scheduler: {
+    pollIntervalMs: number;
+    batchSize: number;
+  };
+}
+
+export interface Config {
+  env: string;
+  port: number;
+  logLevel: string;
+  databaseUrl: string;
+  internalJwtSecret: string;
   tls?: {
     keyFile?: string;
     certFile?: string;
@@ -50,6 +96,7 @@ export const config: Config = {
   port: parseInt(process.env.PORT || '3100', 10),
   logLevel: process.env.LOG_LEVEL || 'info',
   databaseUrl: required('DATABASE_URL'),
+  internalJwtSecret: required('INTERNAL_JWT_SECRET'),
   tls: {
     keyFile: process.env.TLS_KEY_FILE,
     certFile: process.env.TLS_CERT_FILE,
@@ -72,7 +119,17 @@ export const config: Config = {
     secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
     // Support either SMTP_FROM_DEFAULT (new) or legacy SMTP_FROM_ADDRESS
     fromDefault: process.env.SMTP_FROM_DEFAULT || process.env.SMTP_FROM_ADDRESS,
-  fromName: process.env.SMTP_FROM_NAME,
+    fromName: process.env.SMTP_FROM_NAME,
+  },
+  testSmtp: {
+    enabled: (process.env.TEST_SMTP_ENABLED || 'false').toLowerCase() === 'true',
+    host: process.env.TEST_SMTP_HOST || 'localhost',
+    port: parseInt(process.env.TEST_SMTP_PORT || '1025', 10),
+    user: process.env.TEST_SMTP_USER || '',
+    pass: process.env.TEST_SMTP_PASS || '',
+    secure: (process.env.TEST_SMTP_SECURE || 'false').toLowerCase() === 'true',
+    fromDefault: process.env.TEST_SMTP_FROM_DEFAULT || 'test@example.com',
+    fromName: process.env.TEST_SMTP_FROM_NAME || 'Mail Service Test',
   },
   scheduler: {
     pollIntervalMs: parseInt(process.env.SCHEDULER_POLL_MS || '5000', 10),

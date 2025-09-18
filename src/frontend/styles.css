@@ -869,3 +869,223 @@ textarea:disabled {
     text-shadow: 0 0 4px rgba(76, 175, 80, 0.3);
 }
 
+/* New Compose Interface Styles */
+.compose-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.mail-fields .form-group {
+    margin-bottom: 20px;
+}
+
+.mail-fields label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #eee;
+}
+
+.mail-fields .form-control {
+    width: 100%;
+    padding: 10px;
+    background: #121212;
+    color: #eee;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.mail-fields .form-control:focus {
+    outline: none;
+    border-color: #5050ff;
+    box-shadow: 0 0 0 2px rgba(80, 80, 255, 0.2);
+}
+
+.mail-fields textarea.form-control {
+    resize: vertical;
+    font-family: inherit;
+}
+
+.mail-fields select.form-control {
+    cursor: pointer;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.btn-primary {
+    background: #5050ff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #6a6aff;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+#addressCount {
+    font-weight: bold;
+    color: #5050ff;
+}
+
+/* Test send row layout */
+.test-send-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.test-send-row label {
+    margin: 0;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.test-send-row input[type="text"] {
+    flex: 1;
+    max-width: 250px;
+}
+
+/* File input styling */
+input[type="file"] {
+    background: #2a2a2a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 8px;
+    color: #eee;
+}
+
+input[type="file"]::-webkit-file-upload-button {
+    background: #5050ff;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+input[type="file"]::-webkit-file-upload-button:hover {
+    background: #6a6aff;
+}
+
+/* Rich Text Editor Styles */
+.editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px;
+    background: #2a2a2a;
+    border: 1px solid #333;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    flex-wrap: wrap;
+}
+
+.editor-btn {
+    background: #3a3a3a;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    min-width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.editor-btn:hover {
+    background: #4a4a4a;
+}
+
+.editor-btn:active,
+.editor-btn.active {
+    background: #5050ff;
+    border-color: #5050ff;
+}
+
+.editor-select {
+    background: #3a3a3a;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 4px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    height: 28px;
+}
+
+.toolbar-separator {
+    color: #666;
+    margin: 0 4px;
+}
+
+.rich-text-editor {
+    border-radius: 0 0 4px 4px !important;
+    border-top: none !important;
+    padding: 12px !important;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.rich-text-editor:focus {
+    outline: none;
+    border-color: #5050ff !important;
+    box-shadow: 0 0 0 2px rgba(80, 80, 255, 0.2) !important;
+}
+
+.rich-text-editor[contenteditable="true"]:empty:before {
+    content: attr(placeholder);
+    color: #888;
+    font-style: italic;
+}
+
+/* Rich text editor content formatting */
+.rich-text-editor h1, .rich-text-editor h2, .rich-text-editor h3 {
+    margin: 0.5em 0;
+    color: #eee;
+}
+
+.rich-text-editor p {
+    margin: 0.5em 0;
+}
+
+.rich-text-editor ul, .rich-text-editor ol {
+    margin: 0.5em 0;
+    padding-left: 2em;
+}
+
+.rich-text-editor a {
+    color: #6a9eff;
+    text-decoration: underline;
+}
+
+.rich-text-editor strong, .rich-text-editor b {
+    font-weight: bold;
+}
+
+.rich-text-editor em, .rich-text-editor i {
+    font-style: italic;
+}
+

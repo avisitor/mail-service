@@ -1,5 +1,8 @@
 // UI client: tenant management + compose/send + quick ad-hoc send (DB path only now).
-let tenantId = localStorage.getItem('tenantId') || '';
+// Check if we're returning from IDP (has token parameter)
+const url = new URL(window.location.href);
+const hasTokenFromIdp = !!url.searchParams.get('token');
+let tenantId = (!hasTokenFromIdp && localStorage.getItem('tenantId')) || '';
 let appId = localStorage.getItem('appId') || '';
 let authToken = localStorage.getItem('authToken');
 let uiConfig = window.__MAIL_UI_CONFIG__ || {};
@@ -18,35 +21,26 @@ const state = {
     dbMode: true,
     user: null,
 };
-
-// Helper function to get effective role for decision making
-function getEffectiveRole() {
-    return state.user?.effectiveRole || 'editor';
-}
-
-// Helper function to check if user can perform superadmin actions
-function canPerformSuperadminActions() {
-    return state.user?.realRole === 'superadmin';
-}
-
-// Helper function to check if user is in tenant admin context (real or impersonated)
-function isInTenantAdminContext() {
-    return getEffectiveRole() === 'tenant_admin';
-}
-
-// Helper function to check if user is editor-only (no admin privileges)
-function isEditorOnly() {
-    const effectiveRole = getEffectiveRole();
-    return effectiveRole === 'editor';
-}
 function $(sel) { return document.querySelector(sel); }
 function showStatusMessage(el, msg) { el.textContent = msg; setTimeout(() => { if (el.textContent === msg)
     el.textContent = ''; }, 6000); }
 function flashInvalid(el) { el.classList.add('invalid'); setTimeout(() => el.classList.remove('invalid'), 1500); }
+// Utility function to decode HTML entities
+function decodeHtmlEntities(text) {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = text;
+    return textarea.value;
+}
 async function api(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (authToken)
         headers['Authorization'] = 'Bearer ' + authToken;
+    // Debug logging for API calls
+    console.log('[api]', path, {
+        hasAuthToken: !!authToken,
+        hasAuthHeader: !!headers['Authorization'],
+        method: opts.method || 'GET'
+    });
     const res = await fetch(path, { ...opts, headers });
     if (!res.ok) {
         const tx = await res.text();
@@ -55,34 +49,44 @@ async function api(path, opts = {}) {
     return res.json();
 }
 async function listTemplates() {
+    // Only load for legacy tenant-based views that have templateList element
+    const wrap = $('#templateList');
+    if (!wrap)
+        return; // Skip if templateList element doesn't exist (like in compose view)
     try {
-        if (!tenantId) {
-            $('#templateList').innerHTML = '<em>Select or create a tenant first</em>';
-            return;
+        if (tenantId) {
+            // Legacy tenant-based system only
+            const list = await api(`/tenants/${tenantId}/templates`);
+            wrap.innerHTML = list.map((t) => `<div class="tplRow"><button data-id="${t.id}" class="loadTpl">Load</button> ${t.name} v${t.version}</div>`).join('') || '<em>No templates yet</em>';
+            wrap.querySelectorAll('button.loadTpl').forEach(btn => btn.addEventListener('click', () => loadTemplate(btn.dataset.id)));
         }
-        const list = await api(`/tenants/${tenantId}/templates`);
-        const wrap = $('#templateList');
-        wrap.innerHTML = list.map((t) => `<div class="tplRow"><button data-id="${t.id}" class="loadTpl">Load</button> ${t.name} v${t.version}</div>`).join('') || '<em>No templates yet</em>';
-        wrap.querySelectorAll('button.loadTpl').forEach(btn => btn.addEventListener('click', () => loadTemplate(btn.dataset.id)));
+        else {
+            wrap.innerHTML = '<em>Select or create a tenant first</em>';
+        }
     }
     catch (e) {
         console.error(e);
+        if (wrap)
+            wrap.innerHTML = '<em>Error loading templates</em>';
     }
 }
 let selectedGroupId = null;
 async function listGroups() {
+    // Only load for legacy tenant-based views that have groupsList element
+    const wrap = document.getElementById('groupsList');
+    if (!wrap)
+        return; // Skip if groupsList element doesn't exist (like in compose view)
     if (!state.dbMode || !tenantId) {
-        (document.getElementById('groupsList')).innerHTML = state.dbMode ? '<em>Select tenant</em>' : '<em>In-memory: groups not tracked</em>';
+        wrap.innerHTML = state.dbMode ? '<em>Select tenant</em>' : '<em>In-memory: groups not tracked</em>';
         return;
     }
     try {
         const groups = await api(`/tenants/${tenantId}/groups`);
-        const wrap = document.getElementById('groupsList');
         wrap.innerHTML = groups.map((g) => `<div class="grpRow"><button data-g="${g.id}" class="loadGroup">#</button> ${g.subject || g.id} <span style='opacity:.6'>${g.status}</span> <span style='opacity:.6'>S:${g.sentCount} F:${g.failedCount}</span></div>`).join('') || '<em>No groups</em>';
         wrap.querySelectorAll('button.loadGroup').forEach(btn => btn.addEventListener('click', () => { selectedGroupId = btn.dataset.g; document.getElementById('cancelGroupBtn').disabled = false; loadGroupEvents(selectedGroupId); }));
     }
     catch (e) {
-        document.getElementById('groupsList').innerHTML = '<em>Error loading groups</em>';
+        wrap.innerHTML = '<em>Error loading groups</em>';
     }
 }
 async function loadGroupEvents(groupId) {
@@ -109,120 +113,129 @@ async function loadTemplate(id) {
     updateEnvInfo();
 }
 // Template creation
-$('#templateForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const fd = new FormData(form);
-    const payload = {
-        tenantId,
-        name: fd.get('name'),
-        version: Number(fd.get('version')),
-        subject: fd.get('subject'),
-        bodyHtml: fd.get('bodyHtml'),
-        bodyText: fd.get('bodyText') || undefined,
-        variables: {}
-    };
-    const varsRaw = fd.get('variables');
-    if (varsRaw?.trim()) {
+const templateForm = $('#templateForm');
+if (templateForm) {
+    templateForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const fd = new FormData(form);
+        const payload = {
+            tenantId,
+            name: fd.get('name'),
+            version: Number(fd.get('version')),
+            subject: fd.get('subject'),
+            bodyHtml: fd.get('bodyHtml'),
+            bodyText: fd.get('bodyText') || undefined,
+            variables: {}
+        };
+        const varsRaw = fd.get('variables');
+        if (varsRaw?.trim()) {
+            try {
+                payload.variables = JSON.parse(varsRaw);
+            }
+            catch {
+                showStatusMessage($('#templateStatus'), 'Invalid JSON in variables');
+                flashInvalid(document.querySelector('#templateForm [name=variables]'));
+                return;
+            }
+        }
+        const btn = form.querySelector('button[type=submit]');
+        btn.disabled = true;
         try {
-            payload.variables = JSON.parse(varsRaw);
+            const tpl = await api('/templates', { method: 'POST', body: JSON.stringify(payload) });
+            state.currentTemplate = tpl;
+            showStatusMessage($('#templateStatus'), 'Saved ✔');
+            await listTemplates();
         }
-        catch {
-            showStatusMessage($('#templateStatus'), 'Invalid JSON in variables');
-            flashInvalid(document.querySelector('#templateForm [name=variables]'));
-            return;
+        catch (err) {
+            showStatusMessage($('#templateStatus'), 'Error: ' + err.message);
         }
-    }
-    const btn = form.querySelector('button[type=submit]');
-    btn.disabled = true;
-    try {
-        const tpl = await api('/templates', { method: 'POST', body: JSON.stringify(payload) });
-        state.currentTemplate = tpl;
-        showStatusMessage($('#templateStatus'), 'Saved ✔');
-        await listTemplates();
-    }
-    catch (err) {
-        showStatusMessage($('#templateStatus'), 'Error: ' + err.message);
-    }
-    finally {
-        btn.disabled = false;
-        updateEnvInfo();
-    }
-});
+        finally {
+            btn.disabled = false;
+            updateEnvInfo();
+        }
+    });
+}
 // Render preview
-$('#renderForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!state.currentTemplate) {
-        showStatusMessage($('#renderStatus'), 'No template loaded');
-        return;
-    }
-    const form = e.target;
-    const fd = new FormData(form);
-    let ctx = {};
-    const raw = fd.get('context');
-    if (raw?.trim()) {
+const renderForm = $('#renderForm');
+if (renderForm) {
+    renderForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!state.currentTemplate) {
+            showStatusMessage($('#renderStatus'), 'No template loaded');
+            return;
+        }
+        const form = e.target;
+        const fd = new FormData(form);
+        let ctx = {};
+        const raw = fd.get('context');
+        if (raw?.trim()) {
+            try {
+                ctx = JSON.parse(raw);
+            }
+            catch {
+                showStatusMessage($('#renderStatus'), 'Invalid context JSON');
+                flashInvalid(document.querySelector('#renderForm [name=context]'));
+                return;
+            }
+        }
+        const btn = form.querySelector('button[type=submit]');
+        btn.disabled = true;
         try {
-            ctx = JSON.parse(raw);
+            const rendered = await api(`/templates/${state.currentTemplate.id}/render`, { method: 'POST', body: JSON.stringify({ context: ctx }) });
+            $('#previewSubject').textContent = rendered.subject;
+            const iframe = document.querySelector('#previewHtml');
+            iframe.contentDocument.open();
+            iframe.contentDocument.write(rendered.html);
+            iframe.contentDocument.close();
+            $('#previewText').textContent = rendered.text || '';
+            showStatusMessage($('#renderStatus'), 'Rendered ✔');
         }
-        catch {
-            showStatusMessage($('#renderStatus'), 'Invalid context JSON');
-            flashInvalid(document.querySelector('#renderForm [name=context]'));
-            return;
+        catch (err) {
+            showStatusMessage($('#renderStatus'), 'Error: ' + err.message);
         }
-    }
-    const btn = form.querySelector('button[type=submit]');
-    btn.disabled = true;
-    try {
-        const rendered = await api(`/templates/${state.currentTemplate.id}/render`, { method: 'POST', body: JSON.stringify({ context: ctx }) });
-        $('#previewSubject').textContent = rendered.subject;
-        const iframe = document.querySelector('#previewHtml');
-        iframe.contentDocument.open();
-        iframe.contentDocument.write(rendered.html);
-        iframe.contentDocument.close();
-        $('#previewText').textContent = rendered.text || '';
-        showStatusMessage($('#renderStatus'), 'Rendered ✔');
-    }
-    catch (err) {
-        showStatusMessage($('#renderStatus'), 'Error: ' + err.message);
-    }
-    finally {
-        btn.disabled = false;
-    }
-});
+        finally {
+            btn.disabled = false;
+        }
+    });
+}
 // Group send (draft simplified)
-$('#groupForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!state.currentTemplate) {
-        showStatusMessage($('#groupStatus'), 'No template');
-        return;
-    }
-    const fd = new FormData(e.target);
-    const groupSubject = fd.get('groupSubject');
-    const recipientsRaw = (fd.get('recipients') || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
-    const btn = e.target.querySelector('button[type=submit]');
-    btn.disabled = true;
-    try {
-        const useAppId = state.dbMode ? appId : 'app1';
-        if (state.dbMode && (!tenantId || !useAppId)) {
-            showStatusMessage($('#groupStatus'), 'Select tenant/app');
+const groupForm = $('#groupForm');
+if (groupForm) {
+    groupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!state.currentTemplate) {
+            showStatusMessage($('#groupStatus'), 'No template');
             return;
         }
-        const group = await api('/groups', { method: 'POST', body: JSON.stringify({ tenantId, appId: useAppId, templateId: state.currentTemplate.id, subject: groupSubject }) });
-        if (recipientsRaw.length) {
-            await api(`/groups/${group.id}/recipients`, { method: 'POST', body: JSON.stringify({ recipients: recipientsRaw.map(email => ({ email, context: {} })), dedupe: true, renderNow: false }) });
+        const fd = new FormData(e.target);
+        const groupSubject = fd.get('groupSubject');
+        const recipientsRaw = (fd.get('recipients') || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true;
+        try {
+            const useAppId = state.dbMode ? appId : 'app1';
+            if (state.dbMode && (!tenantId || !useAppId)) {
+                showStatusMessage($('#groupStatus'), 'Select tenant/app');
+                return;
+            }
+            const group = await api('/groups', { method: 'POST', body: JSON.stringify({ tenantId, appId: useAppId, templateId: state.currentTemplate.id, subject: groupSubject }) });
+            if (recipientsRaw.length) {
+                await api(`/groups/${group.id}/recipients`, { method: 'POST', body: JSON.stringify({ recipients: recipientsRaw.map(email => ({ email, context: {} })), dedupe: true, renderNow: false }) });
+            }
+            await api(`/groups/${group.id}/schedule`, { method: 'POST', body: JSON.stringify({}) });
+            await api('/internal/worker/tick', { method: 'POST', body: JSON.stringify({}) });
+            showStatusMessage($('#groupStatus'), 'Sent (dry-run) ✔');
+            await listGroups();
         }
-        await api(`/groups/${group.id}/schedule`, { method: 'POST', body: JSON.stringify({}) });
-        await api('/internal/worker/tick', { method: 'POST', body: JSON.stringify({}) });
-        showStatusMessage($('#groupStatus'), 'Sent (dry-run) ✔');
-        await listGroups();
-    }
-    catch (err) {
-        showStatusMessage($('#groupStatus'), 'Error: ' + err.message);
-    }
-    finally {
-        btn.disabled = false;
-    }
-});
+        catch (err) {
+            showStatusMessage($('#groupStatus'), 'Error: ' + err.message);
+        }
+        finally {
+            btn.disabled = false;
+        }
+    });
+}
 // Deactivate template
 document.getElementById('deactivateTemplateBtn')?.addEventListener('click', async () => {
     if (!state.currentTemplate)
@@ -342,12 +355,6 @@ async function deleteTenant(id) {
     }
 }
 async function loadApps() {
-    console.log('[TRACE] loadApps() LEGACY FUNCTION ENTRY - uses global tenantId!', {
-        tenantId,
-        userTenantId: state.user?.tenantId,
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     if (!tenantId) {
         document.getElementById('appSelect').innerHTML = '<option value="">-- none --</option>';
         return;
@@ -365,10 +372,6 @@ async function loadApps() {
     catch { /* ignore */ }
 }
 async function loadAllApps() {
-    console.log('[TRACE] loadAllApps() ENTRY - WARNING: This loads ALL apps from ALL tenants!', {
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     try {
         console.log('Loading all apps for SMTP config...');
         const list = await api('/apps');
@@ -391,43 +394,30 @@ function hideLogin() {
 }
 function applyRoleVisibility() {
     const roles = state.user?.roles || [];
-    const isEditorOnlyUser = isEditorOnly();
+    const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
     // Hide SMTP Config for Editor-only users
     const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]');
     if (smtpConfigBtn) {
-        smtpConfigBtn.style.display = isEditorOnlyUser ? 'none' : 'block';
+        smtpConfigBtn.style.display = isEditorOnly ? 'none' : 'block';
         // Rename SMTP Config to just "Config" for non-editor users
-        if (!isEditorOnlyUser) {
+        if (!isEditorOnly) {
             smtpConfigBtn.textContent = 'Config';
         }
     }
     // Hide Context pane for Editor-only users
     const contextPanel = document.getElementById('tenantAppPanel');
     if (contextPanel) {
-        contextPanel.style.display = isEditorOnlyUser ? 'none' : 'block';
+        contextPanel.style.display = isEditorOnly ? 'none' : 'block';
     }
     // Hide role context for Editor-only users (they don't need context switching)
     const roleContextDiv = document.getElementById('roleContext');
-    if (roleContextDiv && isEditorOnlyUser) {
+    if (roleContextDiv && isEditorOnly) {
         roleContextDiv.style.display = 'none';
     }
 }
-function onAuthenticated() {
-    console.log('[TRACE] onAuthenticated() ENTRY', {
-        user: state.user?.sub,
-        roles: state.user?.roles,
-        tenantId: state.user?.tenantId,
-        tenantName: state.user?.tenantName
-    });
-    
+function onAuthenticated(cameFromIdp = false) {
+    console.log('[DEBUG] onAuthenticated called with cameFromIdp:', cameFromIdp);
     hideLogin();
-    
-    // Initialize user state with role tracking
-    if (state.user) {
-        state.user.realRole = state.user.roles?.[0] || 'editor';
-        state.user.effectiveRole = state.user.realRole; // Will be updated by context switching if needed
-    }
-    
     const roles = state.user?.roles || [];
     const userSummary = document.getElementById('userSummary');
     if (userSummary) {
@@ -439,31 +429,65 @@ function onAuthenticated() {
     }
     document.getElementById('userPane').style.display = 'flex';
     applyRoleVisibility();
-    
-    // UNIFIED PATH: Determine effective context from resolved /me data
-    const resolvedTenantId = state.user?.tenantId;  // Already looked up from appId by backend
-    const resolvedTenantName = state.user?.tenantName || resolvedTenantId || 'Your Tenant';
-    const isSuperadmin = canPerformSuperadminActions();
-    
-    if (resolvedTenantId) {
-        // SINGLE PATH: Anyone with a resolved tenantId gets tenant context automatically
-        console.log(`[unified-auth] Setting tenant context for ${state.user?.sub}: ${resolvedTenantName} (${resolvedTenantId})`);
-        switchToTenantContext(resolvedTenantId, resolvedTenantName);
-    } else if (isSuperadmin) {
-        // Superadmin without tenant context - show tenant selection
-        console.log(`[unified-auth] Superadmin without tenant context - loading tenant selection`);
-        loadTenants().then(() => {
-            wireNav();
-            wireAppManagement();
-            updateRoleContext();
-        });
-    } else {
-        // Edge case: no tenant context available
-        console.error('[unified-auth] No tenant context available for user');
-        updateRoleContext();
+    // Initialize role context
+    updateRoleContext();
+    // Role based UI adjustments
+    const isSuperadmin = roles.includes('superadmin');
+    const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
+    // Hide Tenants nav for anyone who is not superadmin
+    if (!isSuperadmin) {
+        document.querySelectorAll('[data-view=tenants]').forEach(el => el.style.display = 'none');
+        document.getElementById('goToTenantsBtn')?.remove();
+    }
+    const loadTenantsPromise = isSuperadmin ? loadTenants().catch(() => { }) : Promise.resolve();
+    loadTenantsPromise.then(async () => {
+        // For superadmin, only load tenantId from localStorage if they specifically chose a tenant context
+        // For non-superadmin, prefer tenantId from token
+        if (isSuperadmin) {
+            console.log('[DEBUG] Superadmin context logic - cameFromIdp:', cameFromIdp, 'isInTenantContext:', roleContext.isInTenantContext);
+            // If returning from IDP, superadmin should start in global context (clear tenant context)
+            if (cameFromIdp) {
+                console.log('[DEBUG] Clearing tenant context for superadmin returning from IDP');
+                tenantId = '';
+                localStorage.removeItem('tenantId');
+                // Clear tenant context flags
+                roleContext.isInTenantContext = false;
+                roleContext.contextTenantId = '';
+                roleContext.contextTenantName = '';
+                localStorage.removeItem('contextTenantId');
+                localStorage.removeItem('contextTenantName');
+            }
+            else {
+                // On normal page refresh, restore tenant context if they were in one
+                if (roleContext.isInTenantContext && roleContext.contextTenantId) {
+                    tenantId = roleContext.contextTenantId;
+                }
+                // Clear any legacy tenantId from localStorage for superadmins not in tenant context
+                if (!roleContext.isInTenantContext) {
+                    tenantId = '';
+                    localStorage.removeItem('tenantId');
+                }
+            }
+        }
+        else if (!isSuperadmin && state.user?.tenantId && !tenantId) {
+            tenantId = state.user.tenantId;
+            localStorage.setItem('tenantId', tenantId);
+        }
+        if (tenantId)
+            await loadApps();
+        updateEnvInfo();
+        // Skip legacy template/group loading when on compose view
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentView = urlParams.get('view');
+        if (currentView !== 'compose') {
+            if (tenantId)
+                await listTemplates();
+            if (tenantId)
+                await listGroups();
+        }
         wireNav();
         wireAppManagement();
-    }
+    });
 }
 // Tenant creation (exists only in Tenants view now)
 const tenantFormEl = document.getElementById('tenantForm');
@@ -507,53 +531,17 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
     authToken = token;
     localStorage.setItem('authToken', authToken);
     try {
-        console.log('[TRACE] api() call to /me - about to authenticate');
         state.user = await api('/me');
-        console.log('[TRACE] api() call to /me - success, state.user:', state.user);
         if (!state.user)
             throw new Error('No user context');
         statusEl.textContent = 'OK';
         setTimeout(() => { statusEl.textContent = ''; }, 800);
-        console.log('[TRACE] About to call onAuthenticated()');
-        onAuthenticated();
+        onAuthenticated(false); // Manual login form - not from IDP
     }
     catch (err) {
         statusEl.textContent = 'Invalid token';
         authToken = null;
         localStorage.removeItem('authToken');
-    }
-});
-
-// Dev helper buttons for quick login
-document.getElementById('loginAsSuperAdmin')?.addEventListener('click', async () => {
-    const superAdminToken = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjZjYTFhMzA5YTczNWZiODMifQ.eyJzdWIiOiJzdXBlcmFkbWluIiwiaXNzIjoiaHR0cHM6Ly9pZHAud29ybGRzcG90Lm9yZyIsImF1ZCI6Im1haWwtc2VydmljZSIsImV4cCI6MTc1NzkxMTU0NCwiaWF0IjoxNzU3OTA3OTQ0LCJyb2xlcyI6WyJzdXBlcmFkbWluIl0sImFwcElkIjoiY21ma2E2ODhyMDAwMWI3N29mcGdtNTdpeCJ9.RfFnidmMD55qaYkNxMt7sdsXxLf1VLDhdFJGBro-1c2w2aKSI-17lWaZ9C-2aYNysiAOOW0_4KE8i9-i25YAZnXQXaKjVFXpZGE3l0Xt4LZ1pyH3s2B4YjS7r2nCNi4FplMfDa-r10gRghAyBWzYSeHGyAgfeFHOisy6oLfUF2il1s_E46-ailu-Z3wuqE1y1och3RO84pUHjrfaw5LMvehC_WIxb10VZotUTC0R2c4fyZKS58mZb2sXCPnta68EqQeWppY7itAU50rMM6ZoZGoalkRq5PzEmgS6st8bZZkXfM6lmIvgMQ9DwCtLAn5DUbeKECMnJ7ckm8wrThlJ5w';
-    authToken = superAdminToken;
-    localStorage.setItem('authToken', authToken);
-    try {
-        state.user = await api('/me');
-        if (!state.user) throw new Error('No user context');
-        onAuthenticated();
-        // Close login overlay
-        const overlay = document.getElementById('loginOverlay');
-        if (overlay) overlay.style.display = 'none';
-    } catch (err) {
-        console.error('SuperAdmin login failed:', err);
-    }
-});
-
-document.getElementById('loginAsTenantAdmin')?.addEventListener('click', async () => {
-    const tenantAdminToken = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjZjYTFhMzA5YTczNWZiODMifQ.eyJzdWIiOiJ0ZW5hbnQtYWRtaW4tdGVzdC10ZW5hbnQtMSIsImlzcyI6Imh0dHBzOi8vaWRwLndvcmxkc3BvdC5vcmciLCJhdWQiOiJtYWlsLXNlcnZpY2UiLCJleHAiOjE3NTc5MTE1NDQsImlhdCI6MTc1NzkwNzk0NCwicm9sZXMiOlsidGVuYW50X2FkbWluIl0sInRlbmFudElkIjoidGVzdC10ZW5hbnQtMSIsImFwcElkIjoiY21ma2E2ODhyMDAwMWI3N29mcGdtNTdpeCJ9.arElgmBjwtGFd-NzkhCt9FSfUVbvOjPWDIJTfbNzSX6iBOaGP398cKNDr1QQv7Ou6S1jKR0au_eaE9bYhxhZSAs2MtO_RCb_S9G4q4TKZEro7dy6SoF2iH7g08yuKQILUGByvs6QROZMZVnStIdCT9ZprxUli5W0blB4tdxmyBI7nOf5vwMI0alBq9gs4hTAHrDaSJdl4WbeTxknPRefpRaWh1wFplsTFrqCogiZnBFW0nVH1w0g2vq17Si7EEAQFzRRacN29M-Jv5l587jz9ThVrphWyfjv-jDFtYsespQ6-DuV2i-n-YsQpge3QDuPJnM909LMhj1pPEgom0jyxA';
-    authToken = tenantAdminToken;
-    localStorage.setItem('authToken', authToken);
-    try {
-        state.user = await api('/me');
-        if (!state.user) throw new Error('No user context');
-        onAuthenticated();
-        // Close login overlay
-        const overlay = document.getElementById('loginOverlay');
-        if (overlay) overlay.style.display = 'none';
-    } catch (err) {
-        console.error('TenantAdmin login failed:', err);
     }
 });
 document.getElementById('logoutBtn')?.addEventListener('click', () => {
@@ -647,8 +635,8 @@ document.getElementById('tenantSelect')?.addEventListener('change', async (e) =>
     appId = '';
     localStorage.removeItem('appId');
     await loadApps();
-    await listTemplates();
-    await listGroups();
+    await listTemplates(); // Will only run if templateList element exists
+    await listGroups(); // Will only run if groupsList element exists
     updateEnvInfo();
 });
 document.getElementById('appSelect')?.addEventListener('change', (e) => {
@@ -684,28 +672,19 @@ function getAppsViewTitle() {
         return `Apps - Tenant: ${roleContext.contextTenantName}`;
     }
     const roles = state.user?.roles || [];
-    if (canPerformSuperadminActions()) {
+    if (roles.includes('superadmin')) {
         return 'Apps Management (Superadmin)';
     }
-    if (isInTenantAdminContext()) {
+    if (roles.includes('tenant_admin')) {
         const tenantName = state.user?.tenantName || 'Current Tenant';
         return `Apps Management - ${tenantName}`;
     }
     return 'Apps Management';
 }
 async function loadAppsForCurrentContext() {
-    console.log('[TRACE] loadAppsForCurrentContext() ENTRY', {
-        roleContextInTenantContext: roleContext.isInTenantContext,
-        roleContextTenantId: roleContext.contextTenantId,
-        roleContextTenantName: roleContext.contextTenantName,
-        userTenantId: state.user?.tenantId,
-        isInTenantAdminContext: isInTenantAdminContext(),
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     const roles = state.user?.roles || [];
     const targetTenantId = roleContext.isInTenantContext ? roleContext.contextTenantId :
-        (isInTenantAdminContext() ? state.user?.tenantId : null);
+        (roles.includes('tenant_admin') ? state.user?.tenantId : null);
     // Update the app context display
     const appTenantContext = document.getElementById('appTenantContext');
     if (appTenantContext) {
@@ -721,13 +700,10 @@ async function loadAppsForCurrentContext() {
         }
     }
     if (targetTenantId) {
-        console.log('[TRACE] loadAppsForCurrentContext() - calling loadAppsForTenant with:', targetTenantId);
         await loadAppsForTenant(targetTenantId);
-        console.log('[TRACE] loadAppsForCurrentContext() - after loadAppsForTenant, state.apps count:', state.apps?.length);
         await updateAppsUI();
-        console.log('[TRACE] loadAppsForCurrentContext() - after updateAppsUI');
     }
-    else if (canPerformSuperadminActions() && !roleContext.isInTenantContext) {
+    else if (roles.includes('superadmin') && !roleContext.isInTenantContext) {
         // Superadmin outside tenant context - show message to select tenant
         const appsList = document.getElementById('appsList');
         if (appsList) {
@@ -736,17 +712,9 @@ async function loadAppsForCurrentContext() {
     }
 }
 async function loadAppsForTenant(tenantId) {
-    console.log('[TRACE] loadAppsForTenant() ENTRY', {
-        tenantId,
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     try {
-        console.log('[TRACE] loadAppsForTenant() - before API call, current state.apps count:', state.apps?.length);
         const list = await api(`/apps?tenantId=${encodeURIComponent(tenantId)}`);
-        console.log('[TRACE] loadAppsForTenant() - API returned apps:', list?.length, 'apps');
         state.apps = list;
-        console.log('[TRACE] loadAppsForTenant() - after setting state.apps, count:', state.apps?.length);
         return list;
     }
     catch (e) {
@@ -755,12 +723,6 @@ async function loadAppsForTenant(tenantId) {
     }
 }
 async function updateAppsUI() {
-    console.log('[TRACE] updateAppsUI() ENTRY', {
-        appsCount: state.apps?.length,
-        appsPreview: state.apps?.slice(0, 3).map(a => ({id: a.id, name: a.name, tenantId: a.tenantId})),
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     const appsList = document.getElementById('appsList');
     if (!appsList)
         return;
@@ -842,7 +804,7 @@ async function deleteApp(appId) {
 // Role context switching for superadmin
 function updateRoleContext() {
     const roles = state.user?.roles || [];
-    roleContext.isSuperadmin = canPerformSuperadminActions();
+    roleContext.isSuperadmin = roles.includes('superadmin');
     // Update role context display
     const roleContextDisplay = document.getElementById('roleContextDisplay');
     if (roleContextDisplay) {
@@ -862,7 +824,7 @@ function updateRoleContext() {
         }
         else {
             const tenantName = state.user?.tenantName || 'Current Tenant';
-            const roleName = isInTenantAdminContext() ? 'Tenant Admin' : 'Editor';
+            const roleName = roles.includes('tenant_admin') ? 'Tenant Admin' : 'Editor';
             roleContextDisplay.innerHTML = `<span class="context-indicator">${roleName}: ${escapeHtml(tenantName)}</span>`;
         }
     }
@@ -871,28 +833,23 @@ function updateRoleContext() {
 }
 function updateNavigationVisibility() {
     const roles = state.user?.roles || [];
-    const isEditorOnlyUser = isEditorOnly();
+    const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
     const appsNavBtn = document.querySelector('[data-view="apps"]');
-    const composeNavBtn = document.querySelector('[data-view="compose"]');
     const tenantsNavBtn = document.querySelector('[data-view="tenants"]');
     const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]');
     if (appsNavBtn) {
-        // Apps button visible for tenant_admin and superadmin ONLY when in tenant context
-        appsNavBtn.style.display = (isInTenantAdminContext() || (canPerformSuperadminActions() && roleContext.isInTenantContext)) ? 'block' : 'none';
-    }
-    if (composeNavBtn) {
-        // Compose button hidden for superadmin when not in tenant context
-        composeNavBtn.style.display = (canPerformSuperadminActions() && !roleContext.isInTenantContext) ? 'none' : 'block';
+        // Apps button visible for tenant_admin and superadmin (in any context)
+        appsNavBtn.style.display = (roles.includes('tenant_admin') || roles.includes('superadmin')) ? 'block' : 'none';
     }
     if (tenantsNavBtn) {
         // Tenants button only visible for superadmin outside tenant context
-        tenantsNavBtn.style.display = (canPerformSuperadminActions() && !roleContext.isInTenantContext) ? 'block' : 'none';
+        tenantsNavBtn.style.display = (roles.includes('superadmin') && !roleContext.isInTenantContext) ? 'block' : 'none';
     }
     if (smtpConfigBtn) {
         // SMTP Config button hidden for editor-only users
-        smtpConfigBtn.style.display = isEditorOnly() ? 'none' : 'block';
+        smtpConfigBtn.style.display = isEditorOnly ? 'none' : 'block';
         // Update button text for non-editor users
-        if (!isEditorOnly()) {
+        if (!isEditorOnly) {
             smtpConfigBtn.textContent = 'Config';
         }
     }
@@ -997,16 +954,10 @@ function wireAppManagement() {
     }
 }
 function showView(view) {
-    console.log('[TRACE] showView() ENTRY', {
-        view,
-        roleContextInTenantContext: roleContext.isInTenantContext,
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     const roles = state.user?.roles || [];
-    const isEditorOnlyUser = isEditorOnly();
+    const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
     // Restrict editor-only users to compose view only
-    if (isEditorOnlyUser && view !== 'compose') {
+    if (isEditorOnly && view !== 'compose') {
         console.log(`[ui-auth] Editor-only user attempted to access ${view}, redirecting to compose`);
         view = 'compose';
     }
@@ -1039,16 +990,30 @@ function showView(view) {
     if (view === 'apps') {
         loadAppsForCurrentContext();
     }
+    // When Compose view is shown, initialize compose interface
+    if (view === 'compose') {
+        initComposeInterface();
+    }
 }
 function wireNav() {
     document.querySelectorAll('button.navBtn').forEach(btn => btn.addEventListener('click', () => {
         showView(btn.dataset.view);
         savePageState();
     }));
-    
-    // Default view: Config for superadmins not in tenant context, otherwise Compose
-    const defaultView = (canPerformSuperadminActions() && !roleContext.isInTenantContext) ? 'smtp-config' : 'compose';
-    showView(defaultView);
+    // Check for view parameter in URL first
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedView = urlParams.get('view');
+    // Determine the appropriate default view
+    const roles = state.user?.roles || [];
+    const isSuperadmin = roles.includes('superadmin');
+    let defaultView = 'compose'; // Default for tenant admins and editors
+    if (isSuperadmin && !roleContext.isInTenantContext) {
+        // Superadmin in global context should see Config view
+        defaultView = 'smtp-config';
+    }
+    // Use URL parameter if provided, otherwise use default
+    const viewToShow = requestedView || defaultView;
+    showView(viewToShow);
 }
 // Manage Tenants button (in compose context panel)
 document.getElementById('goToTenantsBtn')?.addEventListener('click', () => showView('tenants'));
@@ -1085,8 +1050,6 @@ document.getElementById('quickSendForm')?.addEventListener('submit', async (e) =
     }
 });
 async function init() {
-    console.log('[TRACE] init() ENTRY');
-    
     await detectMode();
     // Load dynamic UI config
     try {
@@ -1125,7 +1088,9 @@ async function init() {
     const tenantHint = url.searchParams.get('tenantId');
     const clientIdHint = url.searchParams.get('clientId');
     const appIdHint = url.searchParams.get('appId') || url.searchParams.get('app');
-    if (tenantHint) {
+    // Only apply hints if not returning from IDP (to avoid overriding superadmin global context)
+    const hasTokenParam = !!url.searchParams.get('token');
+    if (tenantHint && !hasTokenParam) {
         try {
             localStorage.setItem('tenantId', tenantHint);
             tenantId = tenantHint;
@@ -1146,6 +1111,13 @@ async function init() {
     }
     const tokenFromUrl = url.searchParams.get('token');
     const cameFromIdp = !!tokenFromUrl;
+    console.log('[DEBUG] Token detection - tokenFromUrl:', !!tokenFromUrl, 'cameFromIdp:', cameFromIdp);
+    console.log('[DEBUG] Full token details:', {
+        hasUrlToken: !!tokenFromUrl,
+        tokenLength: tokenFromUrl?.length || 0,
+        existingStoredToken: !!localStorage.getItem('authToken'),
+        existingTokenLength: localStorage.getItem('authToken')?.length || 0
+    });
     if (tokenFromUrl) {
         authToken = tokenFromUrl;
         localStorage.setItem('authToken', authToken);
@@ -1161,32 +1133,23 @@ async function init() {
         }
         catch { }
     }
+    else {
+        // Check if we have a stored token
+        const storedToken = localStorage.getItem('authToken');
+        if (storedToken) {
+            authToken = storedToken;
+            console.log('[DEBUG] Using stored token:', { length: storedToken.length });
+        }
+        else {
+            console.log('[DEBUG] No token found in URL or localStorage');
+        }
+    }
     // load user context if auth enabled (ignore errors if auth disabled)
     let authDisabled = false;
     try {
         console.debug('[ui-auth] Calling /me with token:', authToken ? `${authToken.substring(0, 20)}...` : 'none');
-        const userResponse = await api('/me');
-        console.debug('[ui-auth] /me response:', userResponse ? 'user found' : 'null response');
-        
-        // Enhance user state with role tracking
-        if (userResponse) {
-            state.user = {
-                ...userResponse,
-                realRole: userResponse.roles?.[0] || 'editor', // The actual role from authentication
-                effectiveRole: userResponse.roles?.[0] || 'editor' // The role we're operating as (can be changed by impersonation)
-            };
-            
-            // If this is a real tenant admin, automatically set effective tenant context
-            if (state.user.realRole === 'tenant_admin' && state.user.tenantId) {
-                roleContext.isInTenantContext = true;
-                roleContext.contextTenantId = state.user.tenantId;
-                roleContext.contextTenantName = state.user.tenantName || state.user.tenantId;
-                console.debug('[ui-auth] Tenant admin auto-context:', roleContext);
-            }
-        } else {
-            state.user = null;
-        }
-        
+        state.user = await api('/me');
+        console.debug('[ui-auth] /me response:', state.user ? 'user found' : 'null response');
         // If /me returns null but succeeds, auth is disabled
         if (state.user === null) {
             authDisabled = true;
@@ -1315,12 +1278,12 @@ async function init() {
     }
     // If we arrived with a fresh token, immediately reflect authenticated UI
     if (cameFromIdp && state.user) {
-        onAuthenticated();
+        onAuthenticated(true); // Fresh authentication from IDP
         return;
     }
     // If we have a user (whether from IDP or pre-existing token), show authenticated UI
     if (state.user) {
-        onAuthenticated();
+        onAuthenticated(false); // Pre-existing session - restore state
     }
     // Role based UI adjustments
     const roleList = state.user?.roles || [];
@@ -1356,10 +1319,15 @@ async function init() {
         catch { }
     }
     updateEnvInfo();
-    if (tenantId)
-        await listTemplates();
-    if (tenantId)
-        await listGroups();
+    // Skip legacy template/group loading when on compose view
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentView = urlParams.get('view');
+    if (currentView !== 'compose') {
+        if (tenantId)
+            await listTemplates();
+        if (tenantId)
+            await listGroups();
+    }
     wireNav();
     wireAppManagement();
     setupSmtpConfig();
@@ -1381,7 +1349,8 @@ function savePageState() {
             tenantName: roleContext.contextTenantName || undefined,
             smtpConfigView: document.getElementById('view-smtp-config')?.style.display !== 'none',
             inTenantContext: inTenantContext,
-            contextType: inTenantContext ? 'tenant' : 'global'
+            contextType: inTenantContext ? 'tenant' : 'global',
+            appId: composeState?.currentAppId || undefined
         };
         console.debug('[page-state] Saving state:', state);
         localStorage.setItem('pageState', JSON.stringify(state));
@@ -1402,8 +1371,12 @@ function saveToHistory(state) {
             url.searchParams.set('tenant', state.tenantId);
         }
         // Set view parameter based on current state
-        if (state.currentView && state.currentView !== 'compose') {
+        if (state.currentView) {
             url.searchParams.set('view', state.currentView);
+        }
+        // Add appId for compose view
+        if (state.appId && state.currentView === 'compose') {
+            url.searchParams.set('appId', state.appId);
         }
         // Add context type for better restoration
         if (state.contextType && state.contextType !== 'global') {
@@ -1427,10 +1400,6 @@ function saveToHistory(state) {
     }
 }
 function restorePageState() {
-    console.log('[TRACE] restorePageState() ENTRY', {
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     try {
         console.debug('[page-state] Starting page state restoration');
         // First try to restore from URL parameters
@@ -1507,13 +1476,13 @@ function restorePageState() {
         // Restore tenant context if it was saved
         if (savedPageState.tenantId && savedPageState.tenantId !== tenantId) {
             console.debug('[page-state] Switching to saved tenant:', savedPageState.tenantId);
-            // Use the original function to avoid recursive calls
+            // Use the original function to avoid recursive calls, and skip view switch since we'll restore the saved view
             if (originalSwitchToTenantContext) {
-                originalSwitchToTenantContext(savedPageState.tenantId, savedPageState.tenantName || '');
+                originalSwitchToTenantContext(savedPageState.tenantId, savedPageState.tenantName || '', true);
             }
             else {
                 // Fallback to global function
-                window.switchToTenantContext(savedPageState.tenantId, savedPageState.tenantName || '');
+                window.switchToTenantContext(savedPageState.tenantId, savedPageState.tenantName || '', true);
             }
             // If this was a tenant-apps view, switchToTenantContext already set the view
             if (savedPageState.currentView === 'tenant-apps') {
@@ -1573,9 +1542,9 @@ function enhancedShowView(viewName) {
 }
 // Override navigation functions to save state
 const originalSwitchToTenantContext = window.switchToTenantContext;
-function enhancedSwitchToTenantContext(newTenantId, tenantName) {
+function enhancedSwitchToTenantContext(newTenantId, tenantName, skipViewSwitch) {
     if (originalSwitchToTenantContext) {
-        originalSwitchToTenantContext(newTenantId, tenantName);
+        originalSwitchToTenantContext(newTenantId, tenantName, skipViewSwitch);
     }
     savePageState();
 }
@@ -1772,21 +1741,13 @@ function setupTenantContextHandling() {
     });
 }
 async function loadAndDisplayConfigs() {
-    console.log('[TRACE] loadAndDisplayConfigs() ENTRY', {
-        user: state.user?.sub,
-        roles: state.user?.roles,
-        isSuperadmin: canPerformSuperadminActions(),
-        isTenantAdmin: isInTenantAdminContext(),
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
     try {
         // Load all necessary data
         await loadSmtpConfigs();
         // Check user role to determine what to display
         const roles = state.user?.roles || [];
-        const isSuperadmin = canPerformSuperadminActions();
-        const isTenantAdmin = isInTenantAdminContext();
+        const isSuperadmin = roles.includes('superadmin');
+        const isTenantAdmin = roles.includes('tenant_admin');
         if (isSuperadmin) {
             // Superadmin: full tenant management view
             await loadTenants();
@@ -1799,10 +1760,15 @@ async function loadAndDisplayConfigs() {
             const tenantId = state.user?.tenantId;
             const tenantName = state.user?.tenantName || tenantId || 'Your Tenant';
             if (tenantId) {
-                // UNIFIED: Use the same switchToTenantContext that superadmin uses when impersonating
-                // This ensures the exact same API calls and state management
+                // Load apps first (backend will filter to tenant's apps)
+                await loadAllApps();
+                // Use the same switchToTenantContext that superadmin uses when impersonating
+                // This gives us the exact same polished UI
+                // Check if we're currently in compose view to avoid overriding it
+                const currentView = getCurrentView();
+                const skipViewSwitch = currentView === 'compose';
                 if (window.switchToTenantContext) {
-                    window.switchToTenantContext(tenantId, tenantName);
+                    window.switchToTenantContext(tenantId, tenantName, skipViewSwitch);
                 }
                 else {
                     console.warn('switchToTenantContext not available, falling back to basic view');
@@ -1911,7 +1877,7 @@ async function displayTenantOverview() {
     treeContainer.innerHTML = 'Loading configuration overview...';
     try {
         const roles = state.user?.roles || [];
-        const isSuperadmin = canPerformSuperadminActions();
+        const isSuperadmin = roles.includes('superadmin');
         if (isSuperadmin) {
             // Superadmin view: show all tenants and their apps
             if (state.tenants.length === 0) {
@@ -2699,40 +2665,21 @@ async function deleteGlobalConfigById(configId) {
         alert(`Error: ${error.message}`);
     }
 }
-function switchToTenantContext(tenantId, tenantName) {
-    console.log('[TRACE] switchToTenantContext() ENTRY', {
-        tenantId,
-        tenantName,
-        caller: new Error().stack.split('\n')[1].trim()
-    });
-    
+function switchToTenantContext(tenantId, tenantName, skipViewSwitch) {
     // Store tenant context
     localStorage.setItem('contextTenantId', tenantId);
     localStorage.setItem('contextTenantName', tenantName);
     roleContext.isInTenantContext = true;
     roleContext.contextTenantId = tenantId;
     roleContext.contextTenantName = tenantName;
-    
-    // UNIFIED: Initialize user state if not already done
-    if (state.user && !state.user.realRole) {
-        state.user.realRole = state.user.roles?.[0] || 'editor';
-    }
-    
-    // Set effective role for tenant context
-    if (state.user) {
-        state.user.effectiveRole = 'tenant_admin'; // UNIFIED: Everyone in tenant context is effectively tenant_admin
-        console.log(`[unified-context] User ${state.user.sub} (real role: ${state.user.realRole}) now in tenant context: ${tenantName} (${tenantId})`);
-    }
-    
-    // UNIFIED: Complete initialization
+    // Update the display
     updateContextIndicator();
     updateRoleContext();
-    wireNav();
-    wireAppManagement();
-    
-    // Switch to apps view to show this tenant's apps
-    showView('apps');
-    console.log(`[unified-context] Switched to tenant context: ${tenantName} (${tenantId})`);
+    // Switch to apps view to show this tenant's apps (unless skipped)
+    if (!skipViewSwitch) {
+        showView('apps');
+    }
+    console.log(`Switched to tenant context: ${tenantName} (${tenantId})`);
 }
 // Legacy functions removed - replaced with new card-based UI
 // The old buildSmtpTree, selectTreeNode, etc. functions have been replaced
@@ -3252,6 +3199,694 @@ window.editGlobalConfig = editGlobalConfig;
 window.testGlobalConfigById = testGlobalConfigById;
 window.deleteGlobalConfigById = deleteGlobalConfigById;
 window.switchToTenantContext = switchToTenantContext;
+window.clearDraft = clearDraft;
+// Centralized element management for compose interface
+class ComposeElements {
+    static ELEMENT_IDS = {
+        recipients: '#recipients',
+        subject: '#subject',
+        content: '#messageContent',
+        fromAddress: '#fromAddress',
+        templateSelect: '#templateSelect',
+        previousMessageSelect: '#previousMessageSelect',
+        recipientCount: '#addressCount',
+        contentHidden: '#messageContentHidden'
+    };
+    static get recipients() {
+        return document.querySelector(this.ELEMENT_IDS.recipients);
+    }
+    static get subject() {
+        return document.querySelector(this.ELEMENT_IDS.subject);
+    }
+    static get content() {
+        return document.querySelector(this.ELEMENT_IDS.content);
+    }
+    static get fromAddress() {
+        return document.querySelector(this.ELEMENT_IDS.fromAddress);
+    }
+    static get templateSelect() {
+        return document.querySelector(this.ELEMENT_IDS.templateSelect);
+    }
+    static get previousMessageSelect() {
+        return document.querySelector(this.ELEMENT_IDS.previousMessageSelect);
+    }
+    static get recipientCount() {
+        return document.querySelector(this.ELEMENT_IDS.recipientCount);
+    }
+    static get contentHidden() {
+        return document.querySelector(this.ELEMENT_IDS.contentHidden);
+    }
+    static getFormData() {
+        return {
+            recipients: this.recipients?.value || '',
+            subject: this.subject?.value || '',
+            content: this.getTinyMCEContent() || '',
+            fromAddress: this.fromAddress?.value || '',
+            selectedTemplateId: this.templateSelect?.value || '',
+            selectedPreviousMessageId: this.previousMessageSelect?.value || ''
+        };
+    }
+    static setFormData(formData) {
+        if (this.recipients && formData.recipients) {
+            this.recipients.value = formData.recipients;
+        }
+        if (this.subject && formData.subject) {
+            this.subject.value = formData.subject;
+        }
+        if (formData.content) {
+            this.setContent(formData.content);
+        }
+        if (this.fromAddress && formData.fromAddress) {
+            this.fromAddress.value = formData.fromAddress;
+        }
+        if (this.templateSelect && formData.selectedTemplateId) {
+            this.templateSelect.value = formData.selectedTemplateId;
+        }
+        if (this.previousMessageSelect && formData.selectedPreviousMessageId) {
+            this.previousMessageSelect.value = formData.selectedPreviousMessageId;
+        }
+    }
+    static clearForm() {
+        if (this.recipients)
+            this.recipients.value = '';
+        if (this.subject)
+            this.subject.value = '';
+        this.setContent('');
+        if (this.fromAddress)
+            this.fromAddress.value = '';
+        if (this.templateSelect)
+            this.templateSelect.value = '';
+        if (this.previousMessageSelect)
+            this.previousMessageSelect.value = '';
+    }
+    static setContent(content) {
+        const decodedContent = decodeHtmlEntities(content);
+        // Try to use TinyMCE API if available
+        if (window.tinymce && window.tinymce.get('messageContent')) {
+            window.tinymce.get('messageContent').setContent(decodedContent);
+        }
+        else if (this.content) {
+            // Fallback to direct manipulation for textarea before TinyMCE initializes
+            this.content.value = decodedContent;
+        }
+        // Sync to hidden textarea
+        if (this.contentHidden) {
+            this.contentHidden.value = decodedContent;
+        }
+    }
+    static getTinyMCEContent() {
+        // Try to get content from TinyMCE first
+        if (window.tinymce && window.tinymce.get('messageContent')) {
+            return window.tinymce.get('messageContent').getContent();
+        }
+        else if (this.content) {
+            // Fallback to textarea value
+            return this.content.value || '';
+        }
+        return '';
+    }
+    static updateRecipientCount(count) {
+        if (this.recipientCount) {
+            this.recipientCount.textContent = count.toString();
+        }
+    }
+    static setupEventListeners(debouncedSave) {
+        // Recipients textarea
+        this.recipients?.addEventListener('input', () => {
+            updateRecipientCount();
+            debouncedSave();
+        });
+        // Subject field
+        this.subject?.addEventListener('input', debouncedSave);
+        // From address field
+        this.fromAddress?.addEventListener('input', debouncedSave);
+        // Content editor
+        if (this.content) {
+            ['input', 'paste', 'keyup', 'focus', 'blur'].forEach(eventType => {
+                this.content.addEventListener(eventType, debouncedSave);
+            });
+            // Mutation observer for content changes
+            const observer = new MutationObserver(debouncedSave);
+            observer.observe(this.content, {
+                childList: true,
+                subtree: true,
+                characterData: true
+            });
+        }
+    }
+}
+let composeState = {
+    currentAppId: null,
+    templates: [],
+    previousMessages: [],
+    recipientCount: 0,
+    eventListenersSetup: false,
+    recipientsData: []
+};
+// State persistence utilities
+function saveComposeState() {
+    if (!composeState.currentAppId)
+        return;
+    try {
+        const formData = ComposeElements.getFormData();
+        const stateToSave = {
+            currentAppId: composeState.currentAppId,
+            templates: composeState.templates,
+            previousMessages: composeState.previousMessages,
+            recipientCount: composeState.recipientCount,
+            formData,
+            lastSaved: Date.now()
+        };
+        localStorage.setItem(`composeState_${composeState.currentAppId}`, JSON.stringify(stateToSave));
+        console.log('[Compose] State saved for app:', composeState.currentAppId);
+    }
+    catch (error) {
+        console.warn('[Compose] Failed to save state:', error);
+    }
+}
+function loadComposeState(appId) {
+    try {
+        const saved = localStorage.getItem(`composeState_${appId}`);
+        if (!saved)
+            return null;
+        const parsed = JSON.parse(saved);
+        // Validate the saved state
+        if (!parsed.currentAppId || parsed.currentAppId !== appId) {
+            console.warn('[Compose] Invalid saved state for app:', appId);
+            return null;
+        }
+        // Check if state is too old (older than 24 hours)
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        if (Date.now() - parsed.lastSaved > maxAge) {
+            console.log('[Compose] Saved state is too old, ignoring');
+            clearComposeState(appId);
+            return null;
+        }
+        console.log('[Compose] Loaded saved state for app:', appId);
+        return parsed;
+    }
+    catch (error) {
+        console.warn('[Compose] Failed to load saved state:', error);
+        return null;
+    }
+}
+function clearComposeState(appId) {
+    try {
+        if (appId) {
+            localStorage.removeItem(`composeState_${appId}`);
+            console.log('[Compose] Cleared state for app:', appId);
+        }
+        else if (composeState.currentAppId) {
+            localStorage.removeItem(`composeState_${composeState.currentAppId}`);
+            console.log('[Compose] Cleared current state');
+        }
+    }
+    catch (error) {
+        console.warn('[Compose] Failed to clear state:', error);
+    }
+}
+function restoreFormData(formData) {
+    try {
+        ComposeElements.setFormData(formData);
+        // Update recipient count
+        updateRecipientCount();
+        console.log('[Compose] Form data restored');
+    }
+    catch (error) {
+        console.warn('[Compose] Failed to restore form data:', error);
+    }
+}
+function clearComposeForm() {
+    try {
+        ComposeElements.clearForm();
+        updateRecipientCount();
+        console.log('[Compose] Form cleared');
+    }
+    catch (error) {
+        console.warn('[Compose] Failed to clear form:', error);
+    }
+}
+// Clear draft function for user-initiated clearing
+function clearDraft() {
+    if (confirm('Are you sure you want to clear the current draft? This will remove all content and cannot be undone.')) {
+        clearComposeForm();
+        if (composeState.currentAppId) {
+            clearComposeState(composeState.currentAppId);
+        }
+        showStatusMessage($('#composeStatus'), 'Draft cleared');
+    }
+}
+// Initialize compose interface
+async function initComposeInterface() {
+    console.log('[Compose] Initializing compose interface');
+    // Get appId and recipients from URL parameters (passed from /compose redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const appIdFromUrl = urlParams.get('appId');
+    const recipientsFromUrl = urlParams.get('recipients');
+    // Handle recipients data if provided
+    let recipientsData = [];
+    if (recipientsFromUrl) {
+        try {
+            recipientsData = JSON.parse(decodeURIComponent(recipientsFromUrl));
+            console.log('[Compose] Recipients data loaded from URL:', recipientsData.length, 'recipients');
+            // Store recipients data for template processing
+            composeState.recipientsData = recipientsData;
+        }
+        catch (error) {
+            console.error('[Compose] Failed to parse recipients data:', error);
+        }
+    }
+    if (appIdFromUrl) {
+        composeState.currentAppId = appIdFromUrl;
+        // Save page state to preserve the appId for future refreshes
+        savePageState();
+        // Try to restore saved state first
+        const savedState = loadComposeState(appIdFromUrl);
+        if (savedState && !recipientsFromUrl) {
+            console.log('[Compose] Restoring from saved state');
+            // Restore compose state
+            composeState.templates = savedState.templates;
+            composeState.previousMessages = savedState.previousMessages;
+            composeState.recipientCount = savedState.recipientCount;
+            // Populate dropdowns from saved data
+            populateTemplateDropdown(savedState.templates);
+            populatePreviousMessagesDropdown(savedState.previousMessages);
+            // Setup event listeners first
+            setupComposeEventListeners();
+            // Restore form data after a brief delay to ensure DOM is ready
+            setTimeout(() => {
+                restoreFormData(savedState.formData);
+            }, 100);
+            console.log('[Compose] State restored from cache');
+        }
+        else {
+            console.log('[Compose] No saved state or recipients provided, loading fresh data');
+            await loadComposeData();
+            setupComposeEventListeners();
+            // If recipients data provided, populate the recipients field
+            if (recipientsData.length > 0) {
+                populateRecipientsFromData(recipientsData);
+            }
+        }
+    }
+    else {
+        console.log('[Compose] No appId in URL, checking for saved state');
+        // No appId in URL - this might be a refresh after auth redirect
+        // Try to get appId from saved page state
+        const savedPageState = localStorage.getItem('pageState');
+        let savedAppId = null;
+        if (savedPageState) {
+            try {
+                const parsed = JSON.parse(savedPageState);
+                savedAppId = parsed.appId;
+                console.log('[Compose] Found appId in saved page state:', savedAppId);
+            }
+            catch (error) {
+                console.warn('[Compose] Failed to parse saved page state:', error);
+            }
+        }
+        if (savedAppId) {
+            composeState.currentAppId = savedAppId;
+            console.log('[Compose] Using appId from saved state:', savedAppId);
+            // Update URL to include the appId
+            const url = new URL(window.location.href);
+            url.searchParams.set('appId', savedAppId);
+            history.replaceState(null, '', url.toString());
+            // Load data and setup
+            await loadComposeData();
+            setupComposeEventListeners();
+            // Try to restore form state
+            const savedState = loadComposeState(savedAppId);
+            if (savedState) {
+                setTimeout(() => {
+                    restoreFormData(savedState.formData);
+                }, 100);
+                console.log('[Compose] Form state restored from cache');
+            }
+        }
+        else {
+            console.warn('[Compose] No appId available - user may need to be redirected to an app');
+            setupComposeEventListeners();
+        }
+    }
+    updateRecipientCount();
+}
+// Load templates, previous messages, and SMTP config
+async function loadComposeData() {
+    if (!composeState.currentAppId) {
+        console.warn('[Compose] No appId available for loading data');
+        return;
+    }
+    try {
+        // Load templates
+        const templates = await api(`/api/templates?appId=${composeState.currentAppId}`);
+        composeState.templates = templates;
+        populateTemplateDropdown(templates);
+        // Load previous messages 
+        const previousMessages = await api(`/api/previous-messages?appId=${composeState.currentAppId}`);
+        composeState.previousMessages = previousMessages;
+        populatePreviousMessagesDropdown(previousMessages);
+        // Load SMTP from address
+        const smtpFrom = await api(`/api/smtp-from?appId=${composeState.currentAppId}`);
+        $('#fromAddress').value = smtpFrom.formatted;
+        console.log('[Compose] Loaded compose data', {
+            templates: templates.length,
+            messages: previousMessages.length
+        });
+    }
+    catch (error) {
+        console.error('[Compose] Failed to load compose data', error);
+        showStatusMessage($('#composeStatus'), 'Error loading compose data: ' + error.message);
+    }
+}
+// Populate template dropdown
+function populateTemplateDropdown(templates) {
+    const select = $('#templateSelect');
+    select.innerHTML = '<option value="">-- Select a template --</option>';
+    templates.forEach(template => {
+        const option = document.createElement('option');
+        option.value = template.id;
+        option.textContent = template.title || template.name || 'Untitled Template';
+        if (template.description) {
+            option.textContent += ` - ${template.description}`;
+        }
+        select.appendChild(option);
+    });
+}
+// Populate previous messages dropdown  
+function populatePreviousMessagesDropdown(messages) {
+    const select = $('#previousMessageSelect');
+    select.innerHTML = '<option value="">-- Select previous message --</option>';
+    messages.forEach(message => {
+        const option = document.createElement('option');
+        option.value = message.messageId;
+        const date = new Date(message.sent).toISOString().substring(0, 19).replace('T', ' ');
+        option.textContent = `${date} - ${message.subject || 'No Subject'}`;
+        select.appendChild(option);
+    });
+}
+// Populate recipients field from recipients data array
+function populateRecipientsFromData(recipientsData) {
+    const recipientsTextarea = ComposeElements.recipients;
+    if (!recipientsTextarea || !recipientsData.length)
+        return;
+    // Extract name and email from each recipient
+    const recipientStrings = recipientsData.map(recipient => {
+        const email = recipient.email || '';
+        const name = recipient.name || recipient['full name'] || recipient['first name'] + ' ' + recipient['last name'] || '';
+        if (name && name.trim()) {
+            return `${name.trim()} <${email}>`;
+        }
+        else {
+            return email;
+        }
+    }).filter(r => r); // Remove empty entries
+    // Set the recipients textarea
+    recipientsTextarea.value = recipientStrings.join('\n');
+    // Update recipient count
+    updateRecipientCount();
+    console.log('[Compose] Populated recipients from data:', recipientStrings.length, 'recipients');
+}
+// Setup event listeners for compose form
+function setupComposeEventListeners() {
+    // Prevent duplicate event listener setup
+    if (composeState.eventListenersSetup) {
+        console.log('[Compose] Event listeners already setup, skipping');
+        return;
+    }
+    console.log('[Compose] Setting up event listeners');
+    composeState.eventListenersSetup = true;
+    // Create a debounced save function to avoid too frequent saves
+    let saveTimeout = null;
+    const debouncedSave = () => {
+        if (saveTimeout)
+            clearTimeout(saveTimeout);
+        saveTimeout = window.setTimeout(() => {
+            saveComposeState();
+        }, 1000); // Save 1 second after user stops typing
+    };
+    // Setup all element event listeners through the centralized class
+    ComposeElements.setupEventListeners(debouncedSave);
+    // Initialize rich text editor
+    initializeRichTextEditor();
+    // Template selection - save state on change
+    const templateSelect = ComposeElements.templateSelect;
+    if (templateSelect) {
+        templateSelect.addEventListener('change', async function () {
+            if (this.value) {
+                await loadTemplateContent(this.value);
+            }
+            saveComposeState(); // Save immediately when template is selected
+        });
+    }
+    // Previous message selection - save state on change
+    const previousMessageSelect = ComposeElements.previousMessageSelect;
+    if (previousMessageSelect) {
+        previousMessageSelect.addEventListener('change', async function () {
+            if (this.value) {
+                await loadPreviousMessageContent(this.value);
+            }
+            saveComposeState(); // Save immediately when message is selected
+        });
+    }
+    // Compose form submission
+    const composeForm = $('#composeForm');
+    if (composeForm) {
+        composeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await sendComposedMessage();
+        });
+    }
+    // Save state when page is about to unload
+    window.addEventListener('beforeunload', () => {
+        saveComposeState();
+    });
+}
+// Update recipient count display
+function updateRecipientCount() {
+    const recipientsText = ComposeElements.recipients?.value || '';
+    const lines = recipientsText.trim().split('\n').filter(line => line.trim() !== '');
+    composeState.recipientCount = lines.length;
+    ComposeElements.updateRecipientCount(composeState.recipientCount);
+}
+// Shared function for loading content into the rich text editor
+function loadContentIntoEditor(content, contentType) {
+    console.log(`[Debug] ${contentType} content:`, content);
+    ComposeElements.setContent(content);
+    console.log(`[Debug] Content loaded via ComposeElements.setContent`);
+}
+// Load template content
+async function loadTemplateContent(templateId) {
+    try {
+        const template = await api(`/api/template/${templateId}`);
+        // Clear previous message selection
+        $('#previousMessageSelect').value = '';
+        // Populate form fields
+        $('#subject').value = template.subject || '';
+        // Load content into the rich text editor
+        const content = template.content || template.bodyHtml || '';
+        loadContentIntoEditor(content, 'Template');
+        console.log('[Compose] Loaded template content', templateId);
+    }
+    catch (error) {
+        console.error('[Compose] Failed to load template', error);
+        showStatusMessage($('#composeStatus'), 'Error loading template: ' + error.message);
+    }
+}
+// Load previous message content  
+async function loadPreviousMessageContent(messageId) {
+    try {
+        const message = await api(`/api/previous-message/${messageId}`);
+        // Clear template selection
+        $('#templateSelect').value = '';
+        // Populate form fields
+        $('#subject').value = message.subject || '';
+        // Load content into the rich text editor
+        const content = message.message || '';
+        loadContentIntoEditor(content, 'Previous message');
+        console.log('[Compose] Loaded previous message content', messageId);
+    }
+    catch (error) {
+        console.error('[Compose] Failed to load previous message', error);
+        showStatusMessage($('#composeStatus'), 'Error loading previous message: ' + error.message);
+    }
+}
+// Initialize rich text editor functionality
+// Initialize TinyMCE rich text editor
+function initializeRichTextEditor() {
+    if (typeof window.tinymce === 'undefined') {
+        console.error('[TinyMCE] TinyMCE not loaded');
+        return;
+    }
+    window.tinymce.init({
+        selector: '#messageContent',
+        plugins: 'lists table image link preview wordcount code autolink autosave',
+        toolbar: [
+            'bold italic underline strikethrough | alignleft aligncenter alignright alignjustify',
+            'bullist numlist | outdent indent | blockquote | link image table | code preview | wordcount'
+        ],
+        menubar: false,
+        height: 300,
+        resize: 'both',
+        relative_urls: false,
+        remove_script_host: false,
+        content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; }',
+        setup: function (editor) {
+            editor.on('change input', function () {
+                // Sync content to hidden textarea for form submission
+                const hiddenTextarea = ComposeElements.contentHidden;
+                if (hiddenTextarea) {
+                    hiddenTextarea.value = editor.getContent();
+                }
+            });
+        },
+        init_instance_callback: function (editor) {
+            console.log('[TinyMCE] Editor initialized:', editor.id);
+        }
+    });
+}
+// Send composed message
+async function sendComposedMessage() {
+    try {
+        // Debug token state at send time
+        console.log('[sendComposedMessage] Token state:', {
+            hasToken: !!authToken,
+            tokenLength: authToken?.length || 0,
+            tokenPreview: authToken ? authToken.substring(0, 20) + '...' : 'none'
+        });
+        const form = $('#composeForm');
+        const formData = new FormData(form);
+        const recipients = (formData.get('recipients') || '').trim();
+        const subject = (formData.get('subject') || '').trim();
+        const messageContent = (formData.get('messageContent') || '').trim();
+        const sendMode = $('#sendMode').value || 'individual';
+        if (!recipients) {
+            showStatusMessage($('#composeStatus'), 'Please enter at least one recipient');
+            return;
+        }
+        if (!subject) {
+            showStatusMessage($('#composeStatus'), 'Please enter a subject');
+            return;
+        }
+        if (!messageContent) {
+            showStatusMessage($('#composeStatus'), 'Please enter message content');
+            return;
+        }
+        // Show sending status
+        showStatusMessage($('#composeStatus'), 'Processing message...');
+        // Parse recipients into array of email strings
+        const recipientEmails = recipients.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(line => {
+            // Extract email from "Name <email>" format
+            const match = line.match(/<([^>]+)>/);
+            return match ? match[1] : line;
+        });
+        console.log('[Compose] Processing message:', {
+            appId: composeState.currentAppId,
+            subject,
+            recipientCount: recipientEmails.length,
+            sendMode,
+            hasRecipientsData: composeState.recipientsData.length > 0
+        });
+        // Check if we have recipient data for template variable substitution
+        const hasRecipientsData = composeState.recipientsData.length > 0;
+        const shouldProcessTemplates = hasRecipientsData && (sendMode === 'individual' ||
+            (sendMode !== 'individual' && recipientEmails.length === 1));
+        // Prepare recipients data for backend processing
+        let recipientsData;
+        if (shouldProcessTemplates) {
+            console.log('[Template] Preparing template data for backend processing');
+            // Send recipients with their context data for backend template processing
+            recipientsData = recipientEmails.map(email => {
+                const recipientData = composeState.recipientsData.find(r => r.email === email);
+                if (recipientData) {
+                    return recipientData; // Full context for template substitution
+                }
+                else {
+                    console.warn('[Template] No recipient data found for:', email, '- sending basic recipient info');
+                    return { email: email }; // Basic recipient without template context
+                }
+            });
+        }
+        else {
+            console.log('[Template] No template processing needed');
+            recipientsData = recipientEmails.map(email => ({ email }));
+        }
+        showStatusMessage($('#composeStatus'), 'Sending message...');
+        // Handle attachments if any are selected
+        const attachmentInput = $('#attachments');
+        const attachments = attachmentInput?.files;
+        if (attachments && attachments.length > 0) {
+            // For now, show a warning that attachments aren't yet supported
+            showStatusMessage($('#composeStatus'), 'Warning: Attachments are not yet supported and will be ignored.');
+            console.warn('[Compose] Attachments selected but not yet supported:', attachments.length, 'files');
+        }
+        let result;
+        console.log('[Template] Sending to backend for processing:', {
+            hasTemplateData: shouldProcessTemplates,
+            recipientCount: recipientsData.length,
+            sendMode: sendMode
+        });
+        // Send to backend - let backend handle all template processing
+        result = await api('/send-now', {
+            method: 'POST',
+            body: JSON.stringify({
+                appId: composeState.currentAppId,
+                subject: subject, // Raw template subject (may contain ${variable} placeholders)
+                html: messageContent, // Raw template HTML (may contain ${variable} placeholders)
+                recipients: recipientsData, // Recipients with full context data for template processing
+                sendMode: sendMode
+            })
+        });
+        console.log('[Compose] Send result:', result);
+        // Clear saved state after successful send
+        if (composeState.currentAppId) {
+            clearComposeState(composeState.currentAppId);
+            console.log('[Compose] Cleared saved state after successful send');
+        }
+        // Show success dialog with results
+        showSendSummaryDialog(result, recipientEmails.length);
+    }
+    catch (error) {
+        console.error('[Compose] Send failed:', error);
+        showStatusMessage($('#composeStatus'), 'Send failed: ' + error.message);
+    }
+}
+// Show send summary dialog
+function showSendSummaryDialog(result, recipientCount) {
+    const status = result.scheduled ? 'Scheduled' : 'Queued for delivery';
+    const details = result.scheduled
+        ? `Your message has been scheduled and will be sent at the specified time.`
+        : `Your message has been queued and should be delivered shortly. Check your email server logs for delivery confirmation.`;
+    let message = `✅ Message ${status.toLowerCase()}!\n\n` +
+        `Recipients: ${recipientCount}\n` +
+        `Group ID: ${result.groupId || 'N/A'}\n` +
+        `Jobs Created: ${result.jobCount || recipientCount}\n` +
+        `Status: ${status}\n\n`;
+    // Add template processing info if applicable
+    if (result.successCount !== undefined) {
+        message += `✅ Successful sends: ${result.successCount}\n`;
+        if (result.errorCount > 0) {
+            message += `❌ Failed sends: ${result.errorCount}\n`;
+        }
+        message += `📧 Template variables processed for individual recipients\n\n`;
+    }
+    message += details;
+    alert(message);
+    // Get returnUrl from URL parameters and redirect back
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnUrl = urlParams.get('returnUrl');
+    if (returnUrl) {
+        console.log('[Compose] Redirecting back to:', returnUrl);
+        window.location.href = returnUrl;
+    }
+    else {
+        // Default redirect to apps view
+        window.location.hash = '#view=apps';
+    }
+}
 init();
 export {};
 //# sourceMappingURL=main.js.map

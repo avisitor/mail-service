@@ -5,6 +5,7 @@
   <title>Mail Service - Compose</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/ui/styles.css" />
+  <script src="https://cdn.tiny.cloud/1/pm0hwd9ezk1wqe3lvzr86js295g5qcq1vp2pbzgzm0fpbluh/tinymce/7/tinymce.min.js" referrerpolicy="origin"></script>
 </head>
 <body>
   <div id="app">
@@ -66,98 +67,101 @@
       </section>
     </main>
     <main class="layout" id="view-compose">
-      <section class="panel" id="tenantAppPanel">
-        <h2>Context</h2>
-        <div class="sub">
-          <label>Tenant <select id="tenantSelect"></select></label>
-        </div>
-        <div class="sub">
-          <label>App <select id="appSelect"></select></label>
-        </div>
-        <div style="margin-top:8px">
-          <button type="button" id="goToTenantsBtn" class="smallBtn">Manage Tenants & Apps</button>
-        </div>
-        <div class="status" id="appStatus"></div>
-      </section>
-      <section class="panel">
-        <h2>Template</h2>
-        <form id="templateForm">
-          <label>Name <input name="name" required placeholder="welcome" /></label>
-          <label>Version <input name="version" type="number" value="1" min="1" required /></label>
-          <label>Subject <input name="subject" required placeholder="Hello {{name}}" /></label>
-          <label>Body (HTML)
-            <textarea name="bodyHtml" rows="6" placeholder="<p>Hi {{name}}</p>"></textarea>
-          </label>
-          <label>Body (Text)
-            <textarea name="bodyText" rows="4" placeholder="Hi {{name}}"></textarea>
-          </label>
-          <label>Variables (JSON)
-            <textarea name="variables" rows="3" placeholder="{ }"></textarea>
-          </label>
-          <button type="submit">Save Template</button>
-          <div class="status" id="templateStatus"></div>
-        </form>
-        <div id="templateList"></div>
-        <div style="margin-top:8px">
-          <button id="deactivateTemplateBtn" type="button" disabled>Deactivate Template</button>
-        </div>
-      </section>
-      <section class="panel">
-        <h2>Render Preview</h2>
-        <form id="renderForm">
-          <label>Context (JSON)
-            <textarea name="context" rows="6" placeholder='{"name":"Alice"}'></textarea>
-          </label>
-          <button type="submit">Render</button>
-          <div class="status" id="renderStatus"></div>
-        </form>
-        <div class="preview">
-          <h3>Subject</h3>
-          <div id="previewSubject" class="code"></div>
-          <h3>HTML</h3>
-            <iframe id="previewHtml"></iframe>
-          <h3>Text</h3>
-          <pre id="previewText" class="code"></pre>
-        </div>
-      </section>
-      <section class="panel">
-  <h2>Send Group</h2>
-        <form id="groupForm">
-          <label>Group Subject <input name="groupSubject" placeholder="Announcement" required /></label>
-          <label>Recipients (CSV emails, one per line)
-            <textarea name="recipients" rows="6" placeholder="user1@example.com\nuser2@example.com"></textarea>
-          </label>
-          <button type="submit">Create + Send (Dry Run)</button>
-          <div class="status" id="groupStatus"></div>
-        </form>
-        <div id="groupEvents"></div>
-          <div style="margin-top:8px">
-            <button id="cancelGroupBtn" type="button" disabled>Cancel Group</button>
+      <div class="compose-container">
+        <form id="composeForm" class="mail-fields">
+          <!-- Send Mode Selection -->
+          <div class="form-group">
+            <label for="sendMode">Send Mode</label>
+            <select id="sendMode" class="form-control">
+              <option value="individual">Individual messages (each recipient gets separate email)</option>
+              <option value="cc">Group with CC (all recipients visible to each other)</option>
+              <option value="bcc">Group with BCC (recipients hidden from each other)</option>
+            </select>
           </div>
-      </section>
-      <section class="panel" id="activityPanel">
-        <h2>Recent Groups</h2>
-        <div id="groupsList" class="code" style="max-height:180px;overflow:auto"></div>
-        <h3 style="margin-top:12px">Group Events</h3>
-        <div id="eventsList" class="code" style="max-height:200px;overflow:auto"></div>
-      </section>
-      <section class="panel">
-        <h2>Quick Send (No Template)</h2>
-        <form id="quickSendForm">
-          <label>Subject <input name="qsSubject" placeholder="Hello" required /></label>
-          <label>HTML Body
-            <textarea name="qsHtml" rows="6" placeholder="<p>Hello world</p>"></textarea>
-          </label>
-          <label>Text Body
-            <textarea name="qsText" rows="4" placeholder="Hello world"></textarea>
-          </label>
-          <label>Recipients (emails, one per line)
-            <textarea name="qsRecipients" rows="5" placeholder="user@example.com"></textarea>
-          </label>
-          <button type="submit">Send Now</button>
-          <div class="status" id="quickSendStatus"></div>
+          
+          <!-- Recipients -->
+          <div class="form-group">
+            <label for="recipients">To (one line per recipient)</label>
+            <textarea id="recipients" class="form-control" rows="5" cols="20" name="recipients" placeholder="user1@example.com&#10;John Doe &lt;user2@example.com&gt;&#10;user3@example.com"></textarea>
+            <span>&nbsp;<span id="addressCount">0</span> recipients</span>
+          </div>
+          
+          <!-- From -->
+          <div class="form-group">
+            <label for="fromAddress">From</label>
+            <input type="text" name="fromAddress" id="fromAddress" class="form-control" placeholder="Loading from SMTP config...">
+          </div>
+          
+          <!-- Subject -->
+          <div class="form-group">
+            <label for="subject">Subject</label>
+            <input type="text" name="subject" id="subject" class="form-control" placeholder="Enter subject">
+          </div>
+          
+          <!-- Schedule Send Time -->
+          <div class="form-group">
+            <label for="datetime">Date/Time to send (empty for immediate, e.g. 5pm for a later time)</label>
+            <input type="datetime-local" name="datetime" id="datetime" class="form-control">
+          </div>
+          
+          <!-- Template Selection -->
+          <div class="form-group">
+            <label for="templateSelect">Optional: Select template (replaces message content)</label>
+            <select id="templateSelect" class="form-control">
+              <option value="">-- Select a template --</option>
+            </select>
+          </div>
+          
+          <!-- Previous Message Selection -->
+          <div class="form-group">
+            <label for="previousMessageSelect">Optional: Select previously sent mail (replaces message content)</label>
+            <select id="previousMessageSelect" class="form-control">
+              <option value="">-- Select previous message --</option>
+            </select>
+          </div>
+          
+          <!-- Content -->
+          <div class="form-group">
+            <label for="messageContent">Content</label>
+            
+            <!-- TinyMCE Editor -->
+            <textarea id="messageContent" 
+                     name="messageContent"
+                     class="form-control" 
+                     style="min-height: 300px;"
+                     placeholder="Enter your message content here"></textarea>
+            
+            <!-- Hidden textarea for form submission -->
+            <textarea id="messageContentHidden" name="messageContent" style="display: none;"></textarea>
+          </div>
+          
+          <!-- File Attachments -->
+          <div class="form-group">
+            <label for="attachments">Attach files:</label>
+            <input id="attachments" name="attachments" type="file" multiple />
+          </div>
+          
+          <!-- Test Send -->
+          <div class="form-group">
+            <div class="test-send-row">
+              <input type="button" class="btn btn-secondary" id="sendTestBtn" value="Send test"> 
+              <label for="testRecipient">to:</label> 
+              <input type="text" class="form-control" id="testRecipient" placeholder="test@example.com">
+            </div>
+          </div>
+          
+          <!-- Send Mail -->
+          <div class="form-group">
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input type="submit" class="btn btn-primary" value="Send mail">
+              <button type="button" class="btn btn-secondary" onclick="clearDraft()" title="Clear the current draft and saved state">Clear Draft</button>
+            </div>
+          </div>
+          
+          <!-- Status Messages -->
+          <div class="status" id="composeStatus"></div>
         </form>
-      </section>
+      </div>
     </main>
     <main class="layout" id="view-smtp-config" style="display:none">
       <!-- Role Context Indicator -->

@@ -48,7 +48,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
     return t;
   });
 
-  app.patch('/tenants/:id', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
+  app.put('/tenants/:id', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     // @ts-ignore
     if (!hasRole(req.userContext, 'superadmin')) return reply.forbidden();
     const { id } = req.params as any;

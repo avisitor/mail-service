@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mail Service Test Application</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .app-selector {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border: 2px solid #dee2e6;
+        }
+        
+        .current-app {
+            font-size: 18px;
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 15px;
+        }
+        
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+        
+        .action-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        
+        .action-section h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .action-section p {
+            color: #6c757d;
+            margin-bottom: 15px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .result.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .result.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .result.info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Mail Service Test Application</h1>
+        
+        <div class="app-selector">
+            <div class="current-app" id="current-app">Currently Testing: ReTree Hawaii</div>
+            <label for="app-select">Select Application:</label>
+                    <select id="appSelect" onchange="updateSelectedApp()">
+            <option value="retree-hawaii">ReTree Hawaii</option>
+            <option value="outings">Outings</option>
+            <option value="invalid-app">Invalid App</option>
+        </select>
+        </div>
+        
+        <div class="app-selection">
+            <label for="testEmailMode">
+                <input type="checkbox" id="testEmailMode" checked>
+                Use Test SMTP (MailHog) instead of production email configuration
+            </label>
+            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">
+                When enabled, emails will be sent to MailHog regardless of the app's SMTP configuration.
+            </p>
+        </div>
+        
+                <div class="action-section">
+            <h3>1. Send Message (Test Mode - No Authentication)</h3>
+            <p>Send a static test message to MailHog using the application context. This bypasses authentication for testing purposes.</p>
+            <button id="send-message-btn" onclick="sendMessage()">Send Test Message</button>
+            <div id="send-message-result" class="result"></div>
+            
+            <h4>Send Message (Production Mode - With Authentication)</h4>
+            <p>Send a message using proper application token authentication (currently not working due to auth setup).</p>
+            <button id="send-message-auth-btn" onclick="sendMessageWithAuth()">Send Message (With Auth)</button>
+            <div id="send-message-auth-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2. Compose Message (User Authentication)</h3>
+            <p>Redirect to mail-service compose view with IDP authentication for a regular user to compose and send email.</p>
+            <button id="compose-message-btn" onclick="composeMessage()">Compose Message</button>
+            <div id="compose-message-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2b. Compose with Template Variables (User Authentication)</h3>
+            <p>Redirect to compose view with pre-populated recipients containing template variables for testing template processing.</p>
+            <button id="compose-template-vars-btn" onclick="composeWithTemplateVars()">Compose with Template Variables</button>
+            <div id="compose-template-vars-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2c. Send Immediate Template Email (API)</h3>
+            <p>Send email immediately using template ID with recipient context data via /send-now API. Tests template variable substitution without user interface.</p>
+            <button id="send-template-api-btn" onclick="sendTemplateWithAPI()">Send Template via API</button>
+            <div id="send-template-api-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>3. Manage Applications (Tenant Admin)</h3>
+            <p>Redirect to mail-service admin view with IDP authentication for tenant admin to manage application configurations.</p>
+            <button id="manage-apps-btn" onclick="manageApplications()">Manage Applications</button>
+            <div id="manage-apps-result" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        // Application configurations
+        const apps = {
+            'retree-hawaii': {
+                name: 'ReTree Hawaii App',
+                appId: 'cmfka688r0001b77ofpgm57ix',
+                description: 'Forest restoration and tree planting application'
+            },
+            'outings': {
+                name: 'Outings Management',
+                appId: 'outings-app-id',
+                description: 'Sierra Club Maui outings management system'
+            },
+            'invalid-app': {
+                name: 'Invalid Application',
+                appId: 'invalid-app-does-not-exist',
+                description: 'Testing with non-existent appId'
+            }
+        };
+        
+        let currentApp = 'retree-hawaii';
+        
+        // Update app selection
+        document.getElementById('appSelect').addEventListener('change', function(e) {
+            currentApp = e.target.value;
+            updateCurrentAppDisplay();
+        });
+        
+        function updateCurrentAppDisplay() {
+            const app = apps[currentApp];
+            document.getElementById('current-app').textContent = `Currently Testing: ${app.name}`;
+        }
+
+        function updateSelectedApp() {
+            currentApp = document.getElementById('appSelect').value;
+            updateCurrentAppDisplay();
+        }
+        
+        function showResult(elementId, message, type) {
+            const resultElement = document.getElementById(elementId);
+            resultElement.textContent = message;
+            resultElement.className = `result ${type}`;
+            resultElement.style.display = 'block';
+        }
+        
+        function hideResult(elementId) {
+            document.getElementById(elementId).style.display = 'none';
+        }
+        
+        function showLoading(buttonId) {
+            const button = document.getElementById(buttonId);
+            button.disabled = true;
+            button.innerHTML += '<span class="loading"></span>';
+        }
+        
+        function hideLoading(buttonId, originalText) {
+            const button = document.getElementById(buttonId);
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+        
+        // Function implementations
+        async function sendMessage() {
+            const app = apps[currentApp];
+            hideResult('send-message-result');
+            showLoading('send-message-btn');
+            
+            try {
+                // First, get application token for silent authentication
+                const tokenResponse = await fetch('/api/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        appId: app.appId,
+                        type: 'application'
+                    })
+                });
+                
+                if (!tokenResponse.ok) {
+                    throw new Error(`Failed to get application token: ${tokenResponse.statusText}`);
+                }
+                
+                const tokenData = await tokenResponse.json();
+                
+                // Now send the message using the application token
+                const messageResponse = await fetch('/api/send-test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        to: 'test@example.com',
+                        subject: `Test message from ${app.name}`,
+                        text: `This is a test message sent from the ${app.name} application via mail-service.\n\nGenerated at: ${new Date().toISOString()}`,
+                        appId: app.appId,
+                        testEmail: document.getElementById('testEmailMode').checked
+                    })
+                });
+                
+                if (!messageResponse.ok) {
+                    throw new Error(`Failed to send message: ${messageResponse.statusText}`);
+                }
+                
+                const messageData = await messageResponse.json();
+                
+                // Create detailed delivery status message
+                let statusMessage = `Message sent successfully!\n`;
+                statusMessage += `Message ID: ${messageData.messageId || 'N/A'}\n`;
+                statusMessage += `Status: ${messageData.status || 'unknown'}\n`;
+                
+                if (messageData.accepted && messageData.accepted.length > 0) {
+                    statusMessage += `Accepted: ${messageData.accepted.join(', ')}\n`;
+                }
+                if (messageData.rejected && messageData.rejected.length > 0) {
+                    statusMessage += `Rejected: ${messageData.rejected.join(', ')}\n`;
+                }
+                if (messageData.response) {
+                    statusMessage += `SMTP Response: ${messageData.response}\n`;
+                }
+                if (messageData.testMode) {
+                    statusMessage += `Mode: ${messageData.testMode}`;
+                }
+                
+                const resultType = (messageData.rejected && messageData.rejected.length > 0) ? 'error' : 'success';
+                showResult('send-message-result', statusMessage, resultType);
+                
+            } catch (error) {
+                console.error('Send message error:', error);
+                showResult('send-message-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('send-message-btn', 'Send Test Message');
+            }
+        }
+        
+        async function sendMessageWithAuth() {
+            const app = apps[currentApp];
+            hideResult('send-message-auth-result');
+            showLoading('send-message-auth-btn');
+            
+            try {
+                // First, get application token for silent authentication
+                const tokenResponse = await fetch('/api/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        appId: app.appId,
+                        type: 'application'
+                    })
+                });
+                
+                if (!tokenResponse.ok) {
+                    throw new Error(`Failed to get application token: ${tokenResponse.statusText}`);
+                }
+                
+                const tokenData = await tokenResponse.json();
+                
+                // Now send the message using the application token
+                const messageResponse = await fetch('/api/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${tokenData.token}`
+                    },
+                    body: JSON.stringify({
+                        to: 'test@example.com',
+                        subject: `Test message from ${app.name} (authenticated)`,
+                        text: `This is an authenticated test message sent from the ${app.name} application via mail-service.\n\nGenerated at: ${new Date().toISOString()}`,
+                        appId: app.appId,
+                        testEmail: document.getElementById('testEmailMode').checked
+                    })
+                });
+                
+                if (!messageResponse.ok) {
+                    throw new Error(`Failed to send message: ${messageResponse.statusText}`);
+                }
+                
+                const messageData = await messageResponse.json();
+                
+                // Create detailed delivery status message for authenticated send
+                let statusMessage = `Authenticated message sent successfully!\n`;
+                statusMessage += `Message ID: ${messageData.messageId || 'N/A'}\n`;
+                statusMessage += `Status: ${messageData.status || 'unknown'}\n`;
+                
+                if (messageData.accepted && messageData.accepted.length > 0) {
+                    statusMessage += `Accepted: ${messageData.accepted.join(', ')}\n`;
+                }
+                if (messageData.rejected && messageData.rejected.length > 0) {
+                    statusMessage += `Rejected: ${messageData.rejected.join(', ')}\n`;
+                }
+                if (messageData.response) {
+                    statusMessage += `SMTP Response: ${messageData.response}\n`;
+                }
+                if (messageData.testMode) {
+                    statusMessage += `Mode: ${messageData.testMode}`;
+                }
+                
+                const resultType = (messageData.rejected && messageData.rejected.length > 0) ? 'error' : 'success';
+                showResult('send-message-auth-result', statusMessage, resultType);
+                
+            } catch (error) {
+                console.error('Send authenticated message error:', error);
+                showResult('send-message-auth-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('send-message-auth-btn', 'Send Message (With Auth)');
+            }
+        }
+        
+        async function composeMessage() {
+            const app = apps[currentApp];
+            hideResult('compose-message-result');
+            showLoading('compose-message-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('compose-message-result', 'AppId validated! Redirecting to compose view...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const composeUrl = `/compose?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = composeUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Compose message error:', error);
+                showResult('compose-message-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('compose-message-btn', 'Compose Message');
+            }
+        }
+        
+        async function composeWithTemplateVars() {
+            const app = apps[currentApp];
+            hideResult('compose-template-vars-result');
+            showLoading('compose-template-vars-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Create recipient data with template variables (based on user's example)
+                const recipients = [
+                    {
+                        'id': 'lead1bcb2b7b4bc93',
+                        'email': 'robw@worldspot.com',
+                        'name': 'alealani evangelista',
+                        'company': 'Pilina ʻĀina',
+                        'island': 'bigisland',
+                        'category': '',
+                        'phone': '8089386534',
+                        'status': 'Registered',
+                        'first name': 'alealani',
+                        'last name': 'evangelista',
+                        'full name': 'alealani evangelista',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    },
+                    {
+                        'id': 'lead5365f8ca1ee82',
+                        'email': 'rew@worldspot.com',
+                        'name': 'Alexander Akana',
+                        'company': 'La&apos;au Kukahi Farms',
+                        'island': 'Maui',
+                        'category': 'Farm,',
+                        'phone': '8083756810',
+                        'status': 'Agreed',
+                        'first name': 'Alexander',
+                        'last name': 'Akana',
+                        'full name': 'Alexander Akana',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    }
+                ];
+                
+                // Show success message and redirect
+                showResult('compose-template-vars-result', 'AppId validated! Redirecting to compose view with template variables...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const recipientsParam = encodeURIComponent(JSON.stringify(recipients));
+                    const composeUrl = `/compose?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}&recipients=${recipientsParam}`;
+                    window.location.href = composeUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Compose with template vars error:', error);
+                showResult('compose-template-vars-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('compose-template-vars-btn', 'Compose with Template Variables');
+            }
+        }
+        
+        async function sendTemplateWithAPI() {
+            const app = apps[currentApp];
+            hideResult('send-template-api-result');
+            showLoading('send-template-api-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Create same recipient data as test 2b for consistency
+                const recipients = [
+                    {
+                        'id': 'lead1bcb2b7b4bc93',
+                        'email': 'robw@worldspot.com',
+                        'name': 'alealani evangelista',
+                        'company': 'Pilina ʻĀina',
+                        'island': 'bigisland',
+                        'category': '',
+                        'phone': '8089386534',
+                        'status': 'Registered',
+                        'first name': 'alealani',
+                        'last name': 'evangelista',
+                        'full name': 'alealani evangelista',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    },
+                    {
+                        'id': 'lead5365f8ca1ee82',
+                        'email': 'rew@worldspot.com',
+                        'name': 'Alexander Akana',
+                        'company': 'La&apos;au Kukahi Farms',
+                        'island': 'Maui',
+                        'category': 'Farm,',
+                        'phone': '8083756810',
+                        'status': 'Agreed',
+                        'first name': 'Alexander',
+                        'last name': 'Akana',
+                        'full name': 'Alexander Akana',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    }
+                ];
+                
+                // Get an authentication token (you'll need to implement getAuthToken function)
+                const authToken = await getAuthToken();
+                if (!authToken) {
+                    throw new Error('Unable to get authentication token');
+                }
+                
+                // Send request to /send-now API with template ID
+                const response = await fetch('/send-now', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': authToken
+                    },
+                    body: JSON.stringify({
+                        appId: app.appId,
+                        templateId: 'tpl_00000090_school_-_please_join_us',
+                        recipients: recipients
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('send-template-api-result', 
+                        `✅ Template email sent successfully!\\n\\n` +
+                        `Group ID: ${result.groupId}\\n` +
+                        `Jobs Created: ${result.jobCount}\\n` +
+                        `Recipients: ${recipients.length}\\n\\n` +
+                        `Check MailHog for the processed template emails with variable substitution.`, 
+                        'success');
+                } else {
+                    throw new Error(result.message || 'API call failed');
+                }
+                
+            } catch (error) {
+                console.error('Send template API error:', error);
+                showResult('send-template-api-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('send-template-api-btn', 'Send Template via API');
+            }
+        }
+        
+        // Helper function to get authentication token
+        async function getAuthToken() {
+            try {
+                // For testing, we'll use the same token generation approach as the backend test
+                // In a real app, this would come from your authentication system
+                const response = await fetch('/api/test-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ appId: apps[currentApp].appId })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return data.token;
+                }
+                
+                // Fallback: return null and let the main function handle the error
+                return null;
+            } catch (error) {
+                console.error('Error getting auth token:', error);
+                return null;
+            }
+        }
+        
+        async function manageApplications() {
+            const app = apps[currentApp];
+            hideResult('manage-apps-result');
+            showLoading('manage-apps-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('manage-apps-result', 'AppId validated! Redirecting to admin view...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const adminUrl = `/admin?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = adminUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Manage applications error:', error);
+                showResult('manage-apps-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('manage-apps-btn', 'Manage Applications');
+            }
+        }
+        
+        // Handle return from mail-service with status
+        window.addEventListener('load', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const status = urlParams.get('status');
+            const message = urlParams.get('message');
+            const action = urlParams.get('action');
+            
+            if (status && message && action) {
+                let resultElementId = '';
+                switch (action) {
+                    case 'compose':
+                        resultElementId = 'compose-message-result';
+                        break;
+                    case 'admin':
+                        resultElementId = 'manage-apps-result';
+                        break;
+                }
+                
+                if (resultElementId) {
+                    const resultType = status === 'success' ? 'success' : 'error';
+                    showResult(resultElementId, decodeURIComponent(message), resultType);
+                    
+                    // Clean up URL parameters
+                    const cleanUrl = window.location.pathname;
+                    window.history.replaceState({}, document.title, cleanUrl);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
