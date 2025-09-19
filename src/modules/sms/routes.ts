@@ -378,6 +378,12 @@ export async function registerSmsRoutes(app: FastifyInstance) {
       return config;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to get SMS config');
+      if (error.message.includes('Access denied') || error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
+        return reply.forbidden(error.message);
+      }
+      if (error.message.includes('not found')) {
+        return reply.notFound(error.message);
+      }
       return reply.internalServerError(error.message);
     }
   });
@@ -388,13 +394,13 @@ export async function registerSmsRoutes(app: FastifyInstance) {
     schema: {
       body: {
         type: 'object',
-        required: ['scope', 'sid', 'token', 'fromNumber'],
+        required: ['scope', 'sid', 'authToken', 'fromNumber'],
         properties: {
           scope: { type: 'string', enum: ['GLOBAL', 'TENANT', 'APP'] },
           tenantId: { type: 'string' },
           appId: { type: 'string' },
           sid: { type: 'string' },
-          token: { type: 'string' },
+          authToken: { type: 'string' },
           fromNumber: { type: 'string' },
           fallbackTo: { type: 'string' },
           serviceSid: { type: 'string' },
@@ -422,7 +428,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
       return reply.status(201).send(config);
     } catch (error: any) {
       app.log.error({ error }, 'Failed to create SMS config');
-      if (error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
+      if (error.message.includes('Access denied') || error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
         return reply.forbidden(error.message);
       }
       if (error.message.includes('already exists')) {
@@ -440,7 +446,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
         type: 'object',
         properties: {
           sid: { type: 'string' },
-          token: { type: 'string' },
+          authToken: { type: 'string' },
           fromNumber: { type: 'string' },
           fallbackTo: { type: 'string' },
           serviceSid: { type: 'string' },
@@ -497,10 +503,42 @@ export async function registerSmsRoutes(app: FastifyInstance) {
         return reply.badRequest('phoneNumber is required');
       }
 
-      // Get the SMS config
-      const config = await getSmsConfigById(id, userContext);
-      if (!config) {
+      // Get the SMS config from database directly to decrypt credentials
+      const { getPrisma } = await import('../../db/prisma.js');
+      const prisma = getPrisma();
+      const rawConfig = await prisma.smsConfig.findUnique({
+        where: { id },
+      });
+      
+      if (!rawConfig) {
         return reply.notFound('SMS configuration not found');
+      }
+
+      // Check access control manually
+      if (userContext && !userContext.roles.includes('superadmin')) {
+        if (rawConfig.scope === 'TENANT' || rawConfig.scope === 'APP') {
+          // For APP scope, get tenant ID from app
+          let configTenantId = rawConfig.tenantId;
+          if (rawConfig.scope === 'APP' && rawConfig.appId) {
+            const app = await prisma.app.findUnique({
+              where: { id: rawConfig.appId },
+              select: { tenantId: true }
+            });
+            configTenantId = app?.tenantId || null;
+          }
+          
+          if (configTenantId !== userContext.tenantId) {
+            return reply.forbidden('Access denied: Cannot test configuration for other tenants');
+          }
+        }
+      }
+
+      // Decrypt the stored credentials
+      const { decrypt } = await import('./service.js');
+      const decryptedToken = rawConfig.token ? decrypt(rawConfig.token) : undefined;
+
+      if (!decryptedToken) {
+        return reply.badRequest('SMS configuration missing authentication token');
       }
 
       // Send test SMS using the provider
@@ -509,16 +547,16 @@ export async function registerSmsRoutes(app: FastifyInstance) {
       // For testing, we need to use Twilio client directly with the specific config
       // @ts-ignore
       const { Twilio } = await import('twilio');
-      const client = new Twilio(config.sid, config.token);
+      const client = new Twilio(rawConfig.sid, decryptedToken);
       
       const messageParams: any = {
         body: testMessage,
         to: phoneNumber,
-        from: config.fromNumber
+        from: rawConfig.fromNumber
       };
       
-      if (config.serviceSid) {
-        messageParams.messagingServiceSid = config.serviceSid;
+      if (rawConfig.serviceSid) {
+        messageParams.messagingServiceSid = rawConfig.serviceSid;
         delete messageParams.from; // Can't use both from and messagingServiceSid
       }
       
@@ -551,12 +589,9 @@ export async function registerSmsRoutes(app: FastifyInstance) {
       }
 
       // Use updateSmsConfig to activate this config and deactivate others
-      await updateSmsConfig(id, { isActive: true }, userContext);
+      const updatedConfig = await updateSmsConfig(id, { isActive: true }, userContext);
 
-      return { 
-        success: true, 
-        message: 'SMS configuration activated successfully'
-      };
+      return updatedConfig;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to activate SMS config');
       return reply.internalServerError(`Activation failed: ${error.message}`);
@@ -580,7 +615,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
         }
       }
 
-      const config = await resolveSmsConfig(tenantId, appId);
+      const config = await resolveSmsConfig(appId, userContext);
       return config;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to get effective SMS config');
@@ -606,7 +641,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
 
       // For GLOBAL scope, we don't need tenant/app context
       if (scope === 'GLOBAL') {
-        const config = await resolveSmsConfig(undefined, undefined);
+        const config = await resolveSmsConfig(undefined, userContext);
         return config;
       }
 
@@ -623,10 +658,52 @@ export async function registerSmsRoutes(app: FastifyInstance) {
         }
       }
 
-      const config = await resolveSmsConfig(tenantId, scope === 'APP' ? appId : undefined);
+      const config = await resolveSmsConfig(scope === 'APP' ? appId : undefined, userContext);
       return config;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to get effective SMS config by scope');
+      return reply.internalServerError(error.message);
+    }
+  });
+
+  // Resolve SMS configuration for an app (hierarchical resolution)
+  app.get('/sms-configs/resolve', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { appId, tenantId } = req.query as { appId?: string; tenantId?: string };
+
+      // If appId is provided, get the tenant from the app
+      let resolvedTenantId = tenantId;
+      if (appId && !resolvedTenantId) {
+        // Get tenant from userContext or from app lookup
+        resolvedTenantId = userContext?.tenantId;
+      }
+
+      // Access control: only superadmins or tenant members can resolve config
+      if (userContext && resolvedTenantId) {
+        const isSuperAdmin = userContext.roles.includes('super_admin');
+        if (!isSuperAdmin && userContext.tenantId !== resolvedTenantId) {
+          return reply.forbidden('Cannot resolve SMS configuration for different tenant');
+        }
+      }
+
+      const config = await resolveSmsConfig(appId, userContext);
+      
+      if (!config) {
+        return reply.notFound('SMS configuration not found');
+      }
+
+      return config;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to resolve SMS config');
+      if (error.message.includes('Access denied') || error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
+        return reply.forbidden(error.message);
+      }
+      if (error.message.includes('not found')) {
+        return reply.notFound(error.message);
+      }
       return reply.internalServerError(error.message);
     }
   });

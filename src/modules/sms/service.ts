@@ -92,17 +92,20 @@ function migrateEncryption(plainText: string): string {
   return encrypt(plainText);
 }
 
+// Export encryption functions for testing
+export { encrypt, decrypt };
+
 interface UserContext {
   roles: string[];
   tenantId?: string;
 }
 
 /**
- * Resolves the active SMS configuration for the given context.
+ * Resolves the active SMS configuration for the given app.
  * Follows hierarchy: APP > TENANT > GLOBAL
+ * Similar to resolveSmtpConfig, takes only appId and looks up tenant internally.
  */
 export async function resolveSmsConfig(
-  tenantId?: string,
   appId?: string,
   userContext?: UserContext
 ): Promise<ResolvedSmsConfig | null> {
@@ -112,12 +115,28 @@ export async function resolveSmsConfig(
 
   const prisma = getPrisma();
 
+  let tenantId: string | undefined;
+
+  // If appId is provided, look up the tenant
+  if (appId) {
+    const app = await prisma.app.findUnique({
+      where: { id: appId },
+      select: { tenantId: true }
+    });
+
+    if (!app) {
+      return null;
+    }
+
+    tenantId = app.tenantId;
+  }
+
   // Access control
-  if (userContext && !userContext.roles.includes('superadmin')) {
+  if (userContext && !userContext.roles.includes('super_admin')) {
     if (!userContext.tenantId) {
       throw new Error('Access denied: No tenant context');
     }
-    // Non-superadmin users can only access their own tenant's configs
+    // Non-super_admin users can only access their own tenant's configs
     if (tenantId && tenantId !== userContext.tenantId) {
       throw new Error('Access denied: Cannot access other tenant configurations');
     }
@@ -198,7 +217,7 @@ export async function listSmsConfigs(userContext?: UserContext): Promise<SmsConf
   let where: any = {};
 
   if (userContext) {
-    if (userContext.roles.includes('superadmin')) {
+    if (userContext.roles.includes('super_admin')) {
       // Superadmin can see all configs
       where = {};
     } else if (userContext.roles.includes('tenant_admin')) {
@@ -263,15 +282,31 @@ export async function createSmsConfig(
     throw new Error('Database is disabled');
   }
 
+  // Validation: require either sid or accountSid
+  if (!input.sid && !input.accountSid) {
+    throw new Error('Either sid or accountSid must be provided');
+  }
+
   const prisma = getPrisma();
 
   // Access control and validation
+  if (input.scope === 'GLOBAL') {
+    if (userContext && !userContext.roles.includes('super_admin')) {
+      throw new Error('Access denied: Only super admins can create global configurations');
+    }
+  }
+
   if (input.scope === 'TENANT' || input.scope === 'APP') {
+    // For TENANT and APP scope, tenantId can be provided in input or inferred from userContext
+    if (!input.tenantId && userContext?.tenantId) {
+      input.tenantId = userContext.tenantId;
+    }
+    
     if (!input.tenantId) {
       throw new Error('Tenant ID is required for TENANT and APP scope configurations');
     }
 
-    if (userContext && !userContext.roles.includes('superadmin')) {
+    if (userContext && !userContext.roles.includes('super_admin')) {
       if (userContext.tenantId !== input.tenantId) {
         throw new Error('Access denied: Cannot create configuration for other tenants');
       }
@@ -317,7 +352,7 @@ export async function createSmsConfig(
       scope: input.scope,
       tenantId: input.tenantId || null,
       appId: input.appId || null,
-      sid: input.accountSid,
+      sid: input.sid || input.accountSid || '',
       token: encrypt(input.authToken),
       fromNumber: input.fromNumber,
       fallbackTo: input.fallbackToNumber || null,
@@ -329,7 +364,7 @@ export async function createSmsConfig(
       tenant: { select: { id: true, name: true } },
       app: { select: { id: true, name: true } },
     },
-  });
+  }) as any;
 
   return {
     id: config.id,
@@ -377,7 +412,7 @@ export async function updateSmsConfig(
   }
 
   // Access control
-  if (userContext && !userContext.roles.includes('superadmin')) {
+  if (userContext && !userContext.roles.includes('super_admin')) {
     if (existingConfig.scope === 'TENANT' || existingConfig.scope === 'APP') {
       if (existingConfig.tenantId !== userContext.tenantId) {
         throw new Error('Access denied: Cannot modify configuration for other tenants');
@@ -470,7 +505,7 @@ export async function deleteSmsConfig(
   }
 
   // Access control
-  if (userContext && !userContext.roles.includes('superadmin')) {
+  if (userContext && !userContext.roles.includes('super_admin')) {
     if (existingConfig.scope === 'TENANT' || existingConfig.scope === 'APP') {
       const configTenantId = existingConfig.scope === 'APP' 
         ? existingConfig.app?.tenantId 
@@ -515,7 +550,7 @@ export async function getSmsConfigById(
   }
 
   // Access control
-  if (userContext && !userContext.roles.includes('superadmin')) {
+  if (userContext && !userContext.roles.includes('super_admin')) {
     if (config.scope === 'TENANT' || config.scope === 'APP') {
       const configTenantId = config.scope === 'APP' 
         ? config.app?.tenantId 
@@ -559,7 +594,7 @@ export async function getSmsConfigById(
     tenantName: config.tenant?.name,
     appName: config.app?.name,
     sid: config.sid,
-    token: decryptedToken, // Return decrypted for editing
+    token: decryptedToken ? '***' : undefined, // Mask sensitive token
     fromNumber: config.fromNumber,
     fallbackTo: config.fallbackTo || undefined,
     serviceSid: config.serviceSid || undefined,

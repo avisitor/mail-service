@@ -50,7 +50,7 @@ describe('pipeline (db mode)', () => {
     const uniqueName = `welcome-${Date.now()}`;
     const tpl = await createTemplate({ tenantId: 't1', appId: 'app1', name: uniqueName, version: 1, subject: 'Hi {{name}}', bodyHtml: '<p>Hi {{name}}</p>', variables: {} });
     const group: any = await createGroup({ tenantId: 't1', appId: 'app1', templateId: tpl.id, subject: 'Fallback' });
-    await ingestRecipients(group.id, { recipients: [ { email: 'a@test.com', context: { name: 'A'} }, { email: 'b@test.com', context: { name: 'B'} } ], dedupe: true, renderNow: false });
+    await ingestRecipients(group.id, { recipients: [ { email: 'test-a@localhost.local', context: { name: 'A'} }, { email: 'test-b@localhost.local', context: { name: 'B'} } ], dedupe: true, renderNow: false });
     await scheduleGroup(group.id);
     const res = await workerTick();
     expect(res.groupsProcessed).toBe(1);

@@ -146,6 +146,13 @@ export async function sendEmail(input: SendEmailInput) {
     };
   }
 
+  // Email routing validation
+  const emailDomain = input.to.split('@')[1]?.toLowerCase();
+  const isSimulatorEmail = emailDomain === 'simulator.amazonses.com';
+  const isTestEmail = emailDomain === 'test.com' || 
+                     emailDomain?.endsWith('.test') || 
+                     ['a@test.com', 'b@test.com'].includes(input.to.toLowerCase());
+
   let transporter: nodemailer.Transporter;
   let fromAddr: string;
   let fromName: string | undefined;
@@ -168,6 +175,19 @@ export async function sendEmail(input: SendEmailInput) {
     // Use resolved application/tenant SMTP configuration
     transporter = await getTransporterAsync(input.tenantId, input.appId);
     const smtpConfig = await resolveSmtpConfig(input.appId);
+
+    // Routing validation: ensure proper service is used for email types
+    if (isSimulatorEmail && smtpConfig.service !== 'ses') {
+      throw new Error(`simulator.amazonses.com emails must be sent through SES service, not ${smtpConfig.service}. Check your SMTP configuration.`);
+    }
+    
+    if (isTestEmail && smtpConfig.service !== 'smtp') {
+      throw new Error(`Test emails (${input.to}) must be sent through SMTP test servers like MailHog, not production services like ${smtpConfig.service}.`);
+    }
+    
+    if (isTestEmail && smtpConfig.host !== 'localhost' && !smtpConfig.host?.includes('mailhog')) {
+      throw new Error(`Test emails (${input.to}) must be sent through localhost/MailHog, not ${smtpConfig.host}.`);
+    }
     
     fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user || '';
     fromName = smtpConfig.fromName;

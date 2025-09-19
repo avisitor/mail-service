@@ -18,7 +18,8 @@ export interface SmsConfigInput {
   scope: 'GLOBAL' | 'TENANT' | 'APP';
   tenantId?: string;
   appId?: string;
-  accountSid: string;
+  sid?: string;
+  accountSid?: string; // Alternative name for sid
   authToken: string;
   fromNumber: string;
   fallbackToNumber?: string;

@@ -66,5 +66,10 @@ export function hasEffectiveTenantAdminRole(user: UserContext | null): boolean {
     return true;
   }
   
+  // Special case: when auth is disabled, superadmin gets full access
+  if (hasRole(user, 'superadmin') && user.sub === 'system') {
+    return true;
+  }
+  
   return false;
 }

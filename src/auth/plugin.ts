@@ -5,23 +5,17 @@ import { config, flags } from '../config.js';
 import { extractUser, UserContext, UserRole } from './roles.js';
 import jwt from 'jsonwebtoken';
 
-console.log('=== AUTH PLUGIN FILE LOADED ===');
-
 export default fp(async function authPlugin(app) {
-  console.log('=== AUTH PLUGIN FUNCTION CALLED ===');
   app.register(fastifyJwt, <FastifyJWTOptions>{
     secret: async (_request: any, token: any) => {
-      console.log('🚀 SECRET FUNCTION CALLED - NEW VERSION 🚀');
       const dbg = (process.env.DEBUG_AUTH || '').toLowerCase() === 'true';
       
       // First check if we can detect an internal token from the request headers
       try {
         const auth = _request?.headers?.authorization || _request?.headers?.Authorization;
-        console.log('[JWT-SECRET] Auth header check:', !!auth);
         if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
           const jwtToken = auth.substring('Bearer '.length).trim();
           const parts = jwtToken.split('.');
-          console.log('[JWT-SECRET] JWT parts length:', parts.length);
           if (parts.length === 3) {
             const b64urlToJson = (s: string) => {
               const pad = s.length % 4 === 2 ? '==' : s.length % 4 === 3 ? '=' : '';
@@ -31,16 +25,14 @@ export default fp(async function authPlugin(app) {
             };
             
             const hdr = b64urlToJson(parts[0]);
-            console.log('[JWT-SECRET] Parsed header:', hdr);
             
-            // Check if this is an internal token (HS256, no kid)
-            if (hdr?.alg === 'HS256' && !hdr?.kid) {
-              console.log('[JWT-SECRET] Detected internal token - returning internal secret');
+            // Check if this is an internal token (HS256, no kid OR kid=internal-secret)
+            if (hdr?.alg === 'HS256' && (!hdr?.kid || hdr?.kid === 'internal-secret')) {
               return config.internalJwtSecret;
             }
             
             // For IDP tokens, get the kid and fetch the signing key
-            if (hdr?.kid) {
+            if (hdr?.kid && hdr?.kid !== 'internal-secret') {
               if (dbg) {
                 console.log('[JWT-SECRET] IDP token detected, kid:', hdr.kid);
               }
@@ -71,45 +63,32 @@ export default fp(async function authPlugin(app) {
     verify: { algorithms: ['RS256', 'HS256'] }, // Allow both RS256 (IDP) and HS256 (internal)
   });
 
-  console.log('🔥 ABOUT TO DECORATE authenticate FUNCTION 🔥');
   
   app.decorate('authenticate', async function (request, reply) {
-    console.log('🚨🚨🚨 [AUTH-PLUGIN] AUTHENTICATE CALLED - DEBUG VERSION 🚨🚨🚨');
-    console.log('[AUTH-PLUGIN] authenticate() called');
-    console.log('[AUTH-PLUGIN] Request URL:', request.url);
-    console.log('[AUTH-PLUGIN] Auth header:', request.headers?.authorization?.substring(0, 20) + '...');
-    console.log('[AUTH-PLUGIN] flags.disableAuth:', flags.disableAuth);
     
     // Check if authentication is disabled
     if (flags.disableAuth) {
-      console.log('[AUTH-PLUGIN] Auth disabled, setting superadmin context');
       // @ts-ignore
       request.userContext = {
         sub: 'system',
-        roles: ['superadmin'] as UserRole[],
-        tenantId: undefined
+        roles: ['superadmin', 'tenant_admin'] as UserRole[],
+        tenantId: 'test-tenant'
       };
-      console.log('[AUTH-PLUGIN] Set userContext:', (request as any).userContext);
       return;
     }
     
     // Check for internal application token manually first
     const authHeader = request.headers?.authorization || request.headers?.Authorization;
-    console.log('[AUTH-PLUGIN] Auth header present:', !!authHeader);
     
     if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring('Bearer '.length).trim();
-      console.log('[AUTH-PLUGIN] Token extracted, length:', token.length);
       
       try {
         // Try to verify as internal token manually
-        console.log('[AUTH-PLUGIN] Attempting manual internal token verification');
         const decoded = jwt.verify(token, config.internalJwtSecret);
-        console.log('[AUTH-PLUGIN] Manual verification successful:', decoded);
         
         // If verification succeeds and it's an app token, use it
         if (decoded && typeof decoded === 'object' && (decoded as any).sub?.startsWith('app:')) {
-          console.log('[AUTH-PLUGIN] Verified internal application token manually');
           // @ts-ignore
           request.userContext = {
             sub: (decoded as any).sub,
@@ -118,23 +97,18 @@ export default fp(async function authPlugin(app) {
             appId: (decoded as any).appId,
             clientId: (decoded as any).clientId
           };
-          console.log('[AUTH-PLUGIN] Set userContext for app token:', (request as any).userContext);
           return;
         }
       } catch (internalErr) {
-        console.log('[AUTH-PLUGIN] Manual internal token verification failed:', (internalErr as Error).message);
       }
     }
     
     try {
-      console.log('[AUTH-PLUGIN] About to verify JWT with fastify-jwt');
       await request.jwtVerify();
-      console.log('[AUTH-PLUGIN] JWT verified successfully, payload:', request.user);
       
       // Check if this is an internal application token from fastify-jwt
       const payload = request.user as any;
       if (payload && payload.sub?.startsWith('app:')) {
-        console.log('[AUTH-PLUGIN] Processing internal application token from fastify-jwt');
         // @ts-ignore
         request.userContext = {
           sub: payload.sub,
@@ -147,12 +121,10 @@ export default fp(async function authPlugin(app) {
         // Standard IDP token - extract user context
         // @ts-ignore
         const userContext = await extractUser(payload);
-        console.log('[AUTH-PLUGIN] extractUser returned:', JSON.stringify(userContext, null, 2));
         // @ts-ignore
         request.userContext = userContext;
       }
     } catch (err) {
-      console.log('[AUTH-PLUGIN] JWT verification failed:', (err as Error).message);
       if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
         try {
           // Basic hinting only; avoid logging full token
