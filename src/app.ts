@@ -12,6 +12,7 @@ import authPlugin from './auth/plugin.js';
 import { registerTemplateRoutes } from './modules/templates/routes.js';
 import { registerSmtpRoutes } from './modules/smtp/routes.js';
 import { registerComposeRoutes } from './modules/compose/routes.js';
+import { registerSmsRoutes } from './modules/sms/routes.js';
 import { extractUser } from './auth/roles.js';
 import { createIdpRedirectUrl, checkAuthentication } from './auth/idp-redirect.js';
 import { registerTenantRoutes } from './modules/tenants/routes.js';
@@ -20,33 +21,7 @@ import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
 import jwt from 'jsonwebtoken';
-
-// Helper function to validate appId exists in database
-async function validateAppId(appId: string): Promise<{ isValid: boolean; app: any | null; error?: string }> {
-  if (!appId) {
-    return { isValid: false, app: null, error: 'appId is required' };
-  }
-
-  try {
-    const prismaModule = await import('./db/prisma.js');
-    const prisma = prismaModule.getPrisma();
-    
-    // Find app by ID or clientId (following existing pattern)
-    let appRecord = await prisma.app.findUnique({ where: { id: appId } });
-    if (!appRecord) {
-      appRecord = await prisma.app.findUnique({ where: { clientId: appId } });
-    }
-    
-    if (!appRecord) {
-      return { isValid: false, app: null, error: `Application '${appId}' not found in mail-service database` };
-    }
-    
-    return { isValid: true, app: appRecord };
-  } catch (error) {
-    console.error('[validateAppId] Database error:', error);
-    return { isValid: false, app: null, error: 'Database validation failed' };
-  }
-}
+import { validateAppId, validateAppAccess } from './utils/app-validation.js';
 
 export function buildApp() {
   // Optional pretty logging in development if pino-pretty is installed; fall back silently if not.
@@ -103,11 +78,15 @@ export function buildApp() {
     });
   }
 
+  // Add app validation decorator for reuse across routes
+  app.decorate('validateAppAccess', validateAppAccess);
+
   // Routes
   registerHealthRoutes(app);
   registerTemplateRoutes(app);
   registerSmtpRoutes(app);
   registerComposeRoutes(app);
+  registerSmsRoutes(app);
   registerTenantRoutes(app);
   registerAppRoutes(app);
   // Simple identity endpoint

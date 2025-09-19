@@ -120,12 +120,12 @@ model Event {
   occurredAt  DateTime      @default(now())
   meta        String?       @db.LongText
   createdAt   DateTime      @default(now())
-  recipient   Recipient?    @relation(fields: [recipientId], references: [id], onDelete: Cascade, map: "Event_recipientId_fkey")
-  group       MessageGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, map: "Event_groupId_fkey")
+  recipient   Recipient?    @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  group       MessageGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([type])
-  @@index([groupId], map: "Event_groupId_idx")
-  @@index([recipientId], map: "Event_recipientId_idx")
+  @@index([groupId], map: "Event_groupId_fkey")
+  @@index([recipientId], map: "Event_recipientId_fkey")
 }
 
 model Suppression {
@@ -176,7 +176,7 @@ model SmsConfig {
   tenant      Tenant?        @relation(fields: [tenantId], references: [id])
   app         App?           @relation(fields: [appId], references: [id], onDelete: Cascade)
   
-  // Twilio settings
+  // Twilio/Trilio settings
   sid         String         // Account SID
   token       String         // Auth Token (encrypted in implementation)
   fromNumber  String         // Sending phone number
@@ -248,8 +248,8 @@ enum SmtpConfigScope {
   APP
 }
 
-enum SmsConfigScope {
-  GLOBAL
-  TENANT
-  APP
+enum SmsConfigScope { 
+  GLOBAL 
+  TENANT 
+  APP 
 }

@@ -187,7 +187,28 @@
         </div>
         
         <div class="action-section">
-            <h3>2d. Send Immediate Template Email (API)</h3>
+            <h3>2d. SMS Compose (User Authentication)</h3>
+            <p>Redirect to mail-service SMS compose view with IDP authentication for a user to compose and send SMS messages.</p>
+            <button id="sms-compose-btn" onclick="composeSms()">Compose SMS</button>
+            <div id="sms-compose-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2e. SMS Compose with Pre-filled Data (User Authentication)</h3>
+            <p>Redirect to SMS compose view with pre-populated phone numbers (+16509064337 and +18083540490) and message for testing pre-fill functionality.</p>
+            <button id="sms-compose-prefill-btn" onclick="composeSmsWithPrefill()">Compose SMS (Pre-filled)</button>
+            <div id="sms-compose-prefill-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2f. Send SMS via API (Bulk)</h3>
+            <p>Send SMS to multiple recipients using the /api/sms/send endpoint. Tests bulk SMS functionality with real Twilio integration to +16509064337 and +18083540490.</p>
+            <button id="send-sms-api-btn" onclick="sendSmsWithAPI()">Send Bulk SMS via API</button>
+            <div id="send-sms-api-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2g. Send Immediate Template Email (API)</h3>
             <p>Send email immediately using template ID with recipient context data via /send-now API. Tests template variable substitution without user interface.</p>
             <button id="send-template-api-btn" onclick="sendTemplateWithAPI()">Send Template via API</button>
             <div id="send-template-api-result" class="result"></div>
@@ -626,6 +647,133 @@
             }
         }
         
+        async function composeSms() {
+            const app = apps[currentApp];
+            hideResult('sms-compose-result');
+            showLoading('sms-compose-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('sms-compose-result', 'AppId validated! Redirecting to SMS compose view...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const smsComposeUrl = `/sms-compose?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = smsComposeUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('SMS compose error:', error);
+                showResult('sms-compose-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('sms-compose-btn', 'Compose SMS');
+            }
+        }
+        
+        async function composeSmsWithPrefill() {
+            const app = apps[currentApp];
+            hideResult('sms-compose-prefill-result');
+            showLoading('sms-compose-prefill-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Pre-fill data for testing - using the same phone numbers as test 2f
+                const phoneNumbers = ['+16509064337', '+18083540490'];
+                const message = 'Test SMS message from Mail Service! This is a pre-filled message to test the SMS compose functionality.';
+                
+                // Show success message and redirect
+                showResult('sms-compose-prefill-result', 'AppId validated! Redirecting to SMS compose view with pre-filled data...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const smsComposeUrl = `/sms-compose?appId=${encodeURIComponent(app.appId)}&phoneNumbers=${encodeURIComponent(JSON.stringify(phoneNumbers))}&message=${encodeURIComponent(message)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = smsComposeUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('SMS compose with prefill error:', error);
+                showResult('sms-compose-prefill-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('sms-compose-prefill-btn', 'Compose SMS (Pre-filled)');
+            }
+        }
+        
+        async function sendSmsWithAPI() {
+            const app = apps[currentApp];
+            hideResult('send-sms-api-result');
+            showLoading('send-sms-api-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Get authentication token
+                const authToken = await getAuthToken();
+                if (!authToken) {
+                    throw new Error('Failed to get authentication token');
+                }
+                
+                // Test SMS data - using multiple phone numbers
+                const testPhoneNumbers = ['+16509064337', '+18083540490'];
+                const testMessage = 'Test SMS from Mail Service API! This message was sent to multiple recipients via the /api/sms/send endpoint.';
+                
+                const response = await fetch('/api/sms/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': authToken
+                    },
+                    body: JSON.stringify({
+                        appId: app.appId,
+                        phoneNumbers: testPhoneNumbers,
+                        message: testMessage
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    let successMessage = `✅ Bulk SMS sent successfully via API!\\n\\n` +
+                        `Total Recipients: ${result.summary.total}\\n` +
+                        `Successful: ${result.summary.successful}\\n` +
+                        `Failed: ${result.summary.failed}\\n\\n`;
+                    
+                    // Add details for each recipient
+                    result.results.forEach((r, index) => {
+                        successMessage += `${index + 1}. ${r.phoneNumber}: `;
+                        if (r.success) {
+                            successMessage += `✅ Sent (ID: ${r.messageId})\\n`;
+                        } else {
+                            successMessage += `❌ Failed (${r.error})\\n`;
+                        }
+                    });
+                    
+                    successMessage += `\\nNote: These SMS messages were sent using real Twilio service.`;
+                    
+                    showResult('send-sms-api-result', successMessage, 'success');
+                } else {
+                    throw new Error(result.message || 'SMS API call failed');
+                }
+                
+            } catch (error) {
+                console.error('Send SMS API error:', error);
+                showResult('send-sms-api-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('send-sms-api-btn', 'Send SMS via API');
+            }
+        }
+
         // Helper function to get authentication token
         async function getAuthToken() {
             try {
@@ -690,6 +838,9 @@
                 switch (action) {
                     case 'compose':
                         resultElementId = 'compose-message-result';
+                        break;
+                    case 'sms-compose':
+                        resultElementId = 'sms-compose-result';
                         break;
                     case 'admin':
                         resultElementId = 'manage-apps-result';

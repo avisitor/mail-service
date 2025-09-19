@@ -15,6 +15,7 @@
         <button data-view="tenants" class="navBtn" id="tenantsNavBtn" style="display:none">Tenants</button>
         <button data-view="apps" class="navBtn" id="appsNavBtn" style="display:none">Apps</button>
         <button data-view="compose" class="navBtn">Compose</button>
+        <button data-view="sms-compose" class="navBtn">Send SMS</button>
         <button data-view="template-editor" class="navBtn" id="templateEditorNavBtn" style="display:none">Templates</button>
         <button data-view="smtp-config" class="navBtn">Config</button>
       </nav>
@@ -214,6 +215,48 @@
           
           <!-- Status Messages -->
           <div class="status" id="templateEditorStatus"></div>
+        </form>
+      </div>
+    </main>
+    <main class="layout" id="view-sms-compose" style="display:none">
+      <div class="compose-container">
+        <div style="background: #2a2a2a; padding: 12px; margin-bottom: 15px; border: 1px solid #555; border-radius: 4px;">
+          <h2 style="margin: 0; color: #4fc3f7;">📱 Send SMS</h2>
+          <div id="smsAppContext" style="color: #ccc; font-size: 0.9em; margin-top: 4px;"></div>
+        </div>
+        
+        <form id="smsComposeForm" class="mail-fields">
+          <!-- Phone Numbers -->
+          <div class="form-group">
+            <label for="phoneNumbers">Phone numbers to send to (one per line)</label>
+            <textarea id="phoneNumbers" class="form-control" rows="5" cols="20" name="phoneNumbers" placeholder="+1-555-123-4567&#10;+1-555-987-6543&#10;15551234567"></textarea>
+            <span>&nbsp;<span id="phoneCount">0</span> recipients</span>
+          </div>
+          
+          <!-- Message Content -->
+          <div class="form-group">
+            <label for="smsMessage">Message to send</label>
+            <textarea id="smsMessage" 
+                     name="smsMessage"
+                     class="form-control" 
+                     rows="6"
+                     maxlength="1600"
+                     placeholder="Enter your SMS message here. Keep it concise - SMS has character limits."></textarea>
+            <div style="font-size: 0.9em; color: #888; margin-top: 4px;">
+              <span id="smsCharCount">0</span>/1600 characters
+            </div>
+          </div>
+          
+          <!-- SMS Actions -->
+          <div class="form-group">
+            <div style="display: flex; gap: 12px; margin-top: 20px;">
+              <button type="submit" class="btn btn-primary">Send SMS</button>
+              <button type="button" id="cancelSmsBtn" class="btn btn-secondary">Cancel</button>
+            </div>
+          </div>
+          
+          <!-- Status Messages -->
+          <div class="status" id="smsComposeStatus"></div>
         </form>
       </div>
     </main>

@@ -1219,6 +1219,502 @@ class TemplateEditorView implements IView {
   }
 }
 
+class SmsComposeView implements IView {
+  readonly name = 'sms-compose';
+  readonly elementId = 'view-sms-compose';
+  
+  private currentAppId: string | null = null;
+  private phoneNumbersData: string[] = [];
+  private isRestoringState = false;
+
+  constructor() {
+    registerView(this);
+  }
+
+  async initialize(): Promise<void> {
+    console.log('[SmsComposeView] Initializing SMS compose view');
+  }
+
+  async activate(): Promise<void> {
+    console.log('[SmsComposeView] Activating SMS compose view');
+    
+    // Get appId from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const appIdFromUrl = urlParams.get('appId');
+    const smsSessionKey = urlParams.get('smsSession');
+    
+    // Check URL parameters for SMS data first
+    let phoneNumbersFromUrl = urlParams.get('phoneNumbers');
+    let messageFromUrl = urlParams.get('message');
+    
+    // If not found in URL params, check fragment
+    if (!phoneNumbersFromUrl || !messageFromUrl) {
+      const fragment = window.location.hash;
+      if (fragment.startsWith('#sms-')) {
+        const fragmentParams = new URLSearchParams(fragment.slice(5)); // Remove '#sms-'
+        if (!phoneNumbersFromUrl) phoneNumbersFromUrl = fragmentParams.get('phoneNumbers');
+        if (!messageFromUrl) messageFromUrl = fragmentParams.get('message');
+        
+        console.log('[SmsComposeView] Found SMS data in fragment - phoneNumbers:', phoneNumbersFromUrl, 'message:', messageFromUrl);
+        
+        // Clean up the fragment
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+    
+    // If still not found and we have a session key, fetch from server
+    if ((!phoneNumbersFromUrl || !messageFromUrl) && smsSessionKey) {
+      try {
+        const response = await fetch(`/api/sms/session/${smsSessionKey}`);
+        if (response.ok) {
+          const sessionData = await response.json();
+          if (!phoneNumbersFromUrl) phoneNumbersFromUrl = sessionData.phoneNumbers;
+          if (!messageFromUrl) messageFromUrl = sessionData.message;
+          
+          console.log('[SmsComposeView] Found SMS data in session - phoneNumbers:', phoneNumbersFromUrl, 'message:', messageFromUrl);
+          
+          // Clean up the session parameter from URL
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('smsSession');
+          history.replaceState(null, '', cleanUrl.toString());
+        }
+      } catch (error) {
+        console.warn('[SmsComposeView] Failed to fetch SMS session data:', error);
+      }
+    }
+    
+    console.log('[SmsComposeView] URL params - appId:', appIdFromUrl, 'phoneNumbers:', phoneNumbersFromUrl);
+    
+    // Handle phone numbers data if provided
+    if (phoneNumbersFromUrl) {
+      try {
+        this.phoneNumbersData = JSON.parse(decodeURIComponent(phoneNumbersFromUrl));
+        console.log('[SmsComposeView] Phone numbers data from URL:', this.phoneNumbersData);
+      } catch (error) {
+        console.warn('[SmsComposeView] Failed to parse phone numbers data:', error);
+      }
+    }
+
+    if (appIdFromUrl) {
+      this.currentAppId = appIdFromUrl;
+      
+      // Update URL to clean up parameters while preserving appId
+      const url = new URL(window.location.href);
+      url.searchParams.set('appId', appIdFromUrl);
+      url.searchParams.delete('phoneNumbers');
+      url.searchParams.delete('message');
+      history.replaceState(null, '', url.toString());
+      
+      this.setupEventListeners();
+      
+      // Update app context display
+      this.updateAppContext();
+      
+      // If phone numbers were provided in URL, populate them
+      if (this.phoneNumbersData.length > 0) {
+        this.populatePhoneNumbersFromData();
+      }
+      
+      // If message was provided in URL, populate it
+      if (messageFromUrl) {
+        const messageTextarea = document.getElementById('smsMessage') as HTMLTextAreaElement;
+        if (messageTextarea) {
+          messageTextarea.value = decodeURIComponent(messageFromUrl);
+          this.updateCharCount();
+        }
+      }
+    } else {
+      // Check for saved state
+      const savedPageState = localStorage.getItem('pageState');
+      let savedAppId = null;
+      
+      console.log('[SmsComposeView] No appId in URL, checking saved page state');
+      
+      if (savedPageState) {
+        try {
+          const parsed = JSON.parse(savedPageState);
+          if (parsed.currentAppId) {
+            savedAppId = parsed.currentAppId;
+            this.currentAppId = savedAppId;
+            console.log('[SmsComposeView] Using saved appId:', savedAppId);
+          }
+        } catch (error) {
+          console.warn('[SmsComposeView] Failed to parse saved page state:', error);
+        }
+      }
+      
+      if (savedAppId) {
+        this.setupEventListeners();
+        this.updateAppContext();
+        await this.restoreState({});
+      } else {
+        console.warn('[SmsComposeView] No appId found in URL or saved state');
+      }
+    }
+  }
+
+  deactivate(): void {
+    console.log('[SmsComposeView] Deactivating SMS compose view');
+    this.saveState();
+  }
+
+  saveState(): any {
+    if (!this.currentAppId) return null;
+    
+    try {
+      const formData = this.getFormData();
+      
+      // Don't overwrite good state with empty state during page refresh/navigation
+      const hasData = formData.phoneNumbers || formData.message;
+      
+      if (!hasData) {
+        // Check if we already have saved state - don't overwrite it with empty data
+        const existingStateKey = `smsComposeState_${this.currentAppId}`;
+        const existingState = localStorage.getItem(existingStateKey);
+        
+        if (existingState) {
+          console.log('[SmsComposeView] Skipping save of empty state to preserve existing data');
+          try {
+            return JSON.parse(existingState);
+          } catch (error) {
+            console.warn('[SmsComposeView] Failed to parse existing state:', error);
+          }
+        }
+      }
+      
+      const state = {
+        currentAppId: this.currentAppId,
+        formData,
+        lastSaved: Date.now()
+      };
+      
+      localStorage.setItem(`smsComposeState_${this.currentAppId}`, JSON.stringify(state));
+      console.log('[SmsComposeView] State saved for app:', this.currentAppId, hasData ? '(with data)' : '(empty)');
+      return state;
+    } catch (error) {
+      console.warn('[SmsComposeView] Failed to save state:', error);
+      return null;
+    }
+  }
+
+  async restoreState(state: any): Promise<void> {
+    if (!this.currentAppId) return;
+    
+    // Prevent multiple simultaneous restorations
+    if (this.isRestoringState) {
+      console.log('[SmsComposeView] Already restoring state, skipping duplicate restoration');
+      return;
+    }
+    
+    this.isRestoringState = true;
+    
+    try {
+      console.log('[SmsComposeView] Starting state restoration for app:', this.currentAppId);
+      
+      // Always use localStorage as the authoritative source for form state
+      const savedState = this.loadSavedState(this.currentAppId);
+      
+      if (savedState) {
+        console.log('[SmsComposeView] Using localStorage state:', savedState);
+        
+        this.currentAppId = savedState.currentAppId;
+        
+        // Wait for DOM elements to be available
+        await this.waitForElements();
+        
+        if (savedState.formData) {
+          console.log('[SmsComposeView] Restoring form data:', savedState.formData);
+          
+          // Validate that formData has meaningful content before restoring
+          const hasData = savedState.formData.phoneNumbers || savedState.formData.message;
+          
+          if (hasData) {
+            await this.setFormData(savedState.formData);
+            this.updatePhoneCount();
+            this.updateCharCount();
+            console.log('[SmsComposeView] Form data restored successfully');
+          } else {
+            console.log('[SmsComposeView] Saved form data is empty, skipping restoration');
+          }
+        }
+        
+        console.log('[SmsComposeView] State restored for app:', this.currentAppId);
+      } else {
+        console.log('[SmsComposeView] No saved state found in localStorage for app:', this.currentAppId);
+      }
+    } catch (error) {
+      console.warn('[SmsComposeView] Failed to restore state:', error);
+    } finally {
+      this.isRestoringState = false;
+    }
+  }
+
+  canAccess(userRoles: string[]): boolean {
+    return true; // All authenticated users can send SMS
+  }
+
+  private async waitForElements(): Promise<void> {
+    const maxWait = 5000; // 5 seconds max
+    const checkInterval = 100; // Check every 100ms
+    let elapsed = 0;
+    
+    while (elapsed < maxWait) {
+      const phoneNumbers = document.getElementById('phoneNumbers');
+      const smsMessage = document.getElementById('smsMessage');
+      
+      if (phoneNumbers && smsMessage) {
+        console.log('[SmsComposeView] All required elements found');
+        return;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      elapsed += checkInterval;
+    }
+    
+    console.warn('[SmsComposeView] Timeout waiting for elements after', maxWait, 'ms');
+  }
+
+  private updateAppContext(): void {
+    const contextElement = document.getElementById('smsAppContext');
+    if (contextElement && this.currentAppId) {
+      const app = state.apps.find(a => a.id === this.currentAppId);
+      const appName = app?.name || this.currentAppId;
+      contextElement.textContent = `App: ${appName}`;
+    }
+  }
+
+  private setupEventListeners(): void {
+    // Prevent duplicate event listeners
+    const form = document.getElementById('smsComposeForm');
+    if (form) {
+      // Use the clone/replace technique to remove existing listeners
+      const newForm = form.cloneNode(true);
+      if (form.parentNode) {
+        form.parentNode.replaceChild(newForm, form);
+      }
+    }
+
+    const smsForm = document.getElementById('smsComposeForm') as HTMLFormElement;
+    const cancelBtn = document.getElementById('cancelSmsBtn') as HTMLButtonElement;
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
+
+    if (smsForm) {
+      smsForm.addEventListener('submit', this.onSubmit.bind(this));
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', this.onCancel.bind(this));
+    }
+
+    if (phoneNumbers) {
+      phoneNumbers.addEventListener('input', this.debounce(() => {
+        this.updatePhoneCount();
+        this.saveState();
+      }, 500));
+    }
+
+    if (smsMessage) {
+      smsMessage.addEventListener('input', this.debounce(() => {
+        this.updateCharCount();
+        this.saveState();
+      }, 500));
+    }
+
+    console.log('[SmsComposeView] Event listeners setup complete');
+  }
+
+  private async onSubmit(event: Event): Promise<void> {
+    event.preventDefault();
+    
+    const formData = this.getFormData();
+    
+    if (!formData.phoneNumbers.trim()) {
+      this.showStatus('Please enter at least one phone number');
+      return;
+    }
+    
+    if (!formData.message.trim()) {
+      this.showStatus('Please enter a message');
+      return;
+    }
+
+    try {
+      this.showStatus('Sending SMS...');
+      
+      const response = await api('/api/sms/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          appId: this.currentAppId,
+          phoneNumbers: formData.phoneNumbers.split('\n').filter((p: string) => p.trim()),
+          message: formData.message
+        })
+      });
+
+      this.showStatus('SMS sent successfully!');
+      
+      // Clear form after successful send
+      this.clearForm();
+      
+      // Return to caller if returnUrl is provided
+      const urlParams = new URLSearchParams(window.location.search);
+      const returnUrl = urlParams.get('returnUrl');
+      if (returnUrl) {
+        setTimeout(() => {
+          window.location.href = decodeURIComponent(returnUrl);
+        }, 1000);
+      }
+      
+    } catch (error) {
+      console.error('[SmsComposeView] Failed to send SMS:', error);
+      this.showStatus('Error sending SMS: ' + (error as Error).message);
+    }
+  }
+
+  private onCancel(): void {
+    // Return to caller if returnUrl is provided
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnUrl = urlParams.get('returnUrl');
+    
+    if (returnUrl) {
+      window.location.href = decodeURIComponent(returnUrl);
+    } else {
+      // Clear form and navigate to apps or default view
+      this.clearForm();
+      showView('apps');
+    }
+  }
+
+  private getFormData(): any {
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
+    
+    return {
+      phoneNumbers: phoneNumbers?.value || '',
+      message: smsMessage?.value || ''
+    };
+  }
+
+  private async setFormData(formData: any): Promise<void> {
+    console.log('[SmsComposeView] Setting form data:', formData);
+    
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
+    
+    if (phoneNumbers && formData.phoneNumbers) {
+      phoneNumbers.value = formData.phoneNumbers;
+      console.log('[SmsComposeView] Set phone numbers:', formData.phoneNumbers);
+    }
+    
+    if (smsMessage && formData.message) {
+      smsMessage.value = formData.message;
+      console.log('[SmsComposeView] Set message:', formData.message);
+    }
+  }
+
+  private populatePhoneNumbersFromData(): void {
+    if (this.phoneNumbersData.length === 0) return;
+    
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    if (phoneNumbers) {
+      phoneNumbers.value = this.phoneNumbersData.join('\n');
+      this.updatePhoneCount();
+      console.log('[SmsComposeView] Populated phone numbers from data:', this.phoneNumbersData.length, 'numbers');
+    }
+  }
+
+  private updatePhoneCount(): void {
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    const phoneCountElement = document.getElementById('phoneCount');
+    
+    if (phoneNumbers && phoneCountElement) {
+      const numbers = phoneNumbers.value.split('\n').filter(p => p.trim());
+      phoneCountElement.textContent = numbers.length.toString();
+    }
+  }
+
+  private updateCharCount(): void {
+    const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
+    const charCountElement = document.getElementById('smsCharCount');
+    
+    if (smsMessage && charCountElement) {
+      const count = smsMessage.value.length;
+      charCountElement.textContent = count.toString();
+      
+      // Change color based on character count
+      if (count > 1200) {
+        charCountElement.style.color = '#dc3545'; // Red
+      } else if (count > 800) {
+        charCountElement.style.color = '#ffc107'; // Yellow
+      } else {
+        charCountElement.style.color = '#6c757d'; // Default gray
+      }
+    }
+  }
+
+  private clearForm(): void {
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
+    
+    if (phoneNumbers) phoneNumbers.value = '';
+    if (smsMessage) smsMessage.value = '';
+    
+    this.updatePhoneCount();
+    this.updateCharCount();
+    
+    // Clear saved state
+    if (this.currentAppId) {
+      localStorage.removeItem(`smsComposeState_${this.currentAppId}`);
+    }
+    
+    console.log('[SmsComposeView] Form cleared');
+  }
+
+  private showStatus(message: string): void {
+    const statusElement = document.getElementById('smsComposeStatus');
+    if (statusElement) {
+      statusElement.textContent = message;
+      statusElement.style.display = 'block';
+      
+      // Auto-hide status after 5 seconds unless it's an error
+      if (!message.toLowerCase().includes('error')) {
+        setTimeout(() => {
+          statusElement.style.display = 'none';
+        }, 5000);
+      }
+    }
+  }
+
+  private debounce(func: Function, wait: number): () => void {
+    let timeout: NodeJS.Timeout;
+    return () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this), wait);
+    };
+  }
+
+  private loadSavedState(appId: string): any {
+    try {
+      const saved = localStorage.getItem(`smsComposeState_${appId}`);
+      if (!saved) return null;
+      
+      const parsed = JSON.parse(saved);
+      
+      // Check if state is too old (older than 24 hours)
+      const maxAge = 24 * 60 * 60 * 1000;
+      if (Date.now() - parsed.lastSaved > maxAge) {
+        localStorage.removeItem(`smsComposeState_${appId}`);
+        return null;
+      }
+      
+      return parsed;
+    } catch (error) {
+      console.warn('[SmsComposeView] Failed to load saved state:', error);
+      return null;
+    }
+  }
+}
+
 // Simple View classes for remaining views
 class AppsView implements IView {
   readonly name = 'apps';
@@ -2447,6 +2943,7 @@ async function initializeViews(): Promise<void> {
   
   // Create view instances (they auto-register themselves in their constructors)
   const composeView = new ComposeView();
+  const smsComposeView = new SmsComposeView();
   const templateEditorView = new TemplateEditorView();
   const appsView = new AppsView();
   const tenantsView = new TenantsView();
@@ -2454,6 +2951,7 @@ async function initializeViews(): Promise<void> {
   
   // Initialize all views
   await composeView.initialize();
+  await smsComposeView.initialize();
   await templateEditorView.initialize();
   await appsView.initialize();
   await tenantsView.initialize();
