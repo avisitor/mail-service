@@ -483,6 +483,52 @@ export function buildApp() {
     }
   });
   
+  // Template Editor route - redirects to IDP for authentication then shows template editor interface (tenant admin only)
+  app.get('/template-editor', async (req, reply) => {
+    const { appId, returnUrl } = req.query as any;
+    
+    // Validate appId is provided and exists in database
+    if (!appId) {
+      console.error('[/template-editor] AppId is required');
+      return reply.code(400).send({ 
+        error: 'Missing Application ID', 
+        message: 'appId parameter is required for template editor endpoint' 
+      });
+    }
+    
+    const validation = await validateAppId(appId);
+    if (!validation.isValid) {
+      console.error('[/template-editor] AppId validation failed:', validation.error);
+      return reply.code(400).send({ 
+        error: 'Invalid Application', 
+        message: validation.error 
+      });
+    }
+    console.log('[/template-editor] AppId validated successfully:', validation.app.name);
+    
+    // Check authentication using the centralized helper
+    const { isAuthenticated } = await checkAuthentication(req);
+    
+    if (isAuthenticated) {
+      // User is authenticated, show template editor interface
+      const templateEditorParams = new URLSearchParams({
+        view: 'template-editor',
+        ...(appId && { appId }),
+        ...(returnUrl && { returnUrl })
+      });
+      return reply.redirect(`/ui?${templateEditorParams}`);
+    } else {
+      // User not authenticated, redirect to IDP using the working pattern
+      const finalDestination = `/ui?view=template-editor${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
+      const idpUrl = createIdpRedirectUrl({
+        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        appId
+      });
+      
+      return reply.redirect(idpUrl);
+    }
+  });
+  
   // Admin route - redirects to IDP for authentication then shows admin interface
   app.get('/admin', async (req, reply) => {
     const { appId, returnUrl } = req.query as any;

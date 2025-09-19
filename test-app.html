@@ -180,7 +180,14 @@
         </div>
         
         <div class="action-section">
-            <h3>2c. Send Immediate Template Email (API)</h3>
+            <h3>2c. Template Editor (Tenant Admin Authentication)</h3>
+            <p>Redirect to mail-service template editor view with IDP authentication for a tenant admin to edit templates.</p>
+            <button id="template-editor-btn" onclick="templateEditor()">Template Editor</button>
+            <div id="template-editor-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
+            <h3>2d. Send Immediate Template Email (API)</h3>
             <p>Send email immediately using template ID with recipient context data via /send-now API. Tests template variable substitution without user interface.</p>
             <button id="send-template-api-btn" onclick="sendTemplateWithAPI()">Send Template via API</button>
             <div id="send-template-api-result" class="result"></div>
@@ -497,6 +504,34 @@
                 showResult('compose-template-vars-result', `Error: ${error.message}`, 'error');
             } finally {
                 hideLoading('compose-template-vars-btn', 'Compose with Template Variables');
+            }
+        }
+        
+        async function templateEditor() {
+            const app = apps[currentApp];
+            hideResult('template-editor-result');
+            showLoading('template-editor-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('template-editor-result', 'AppId validated! Redirecting to template editor...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const templateEditorUrl = `/template-editor?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = templateEditorUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Template editor error:', error);
+                showResult('template-editor-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('template-editor-btn', 'Template Editor');
             }
         }
         

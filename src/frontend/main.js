@@ -1,4 +1,1113 @@
 // UI client: tenant management + compose/send + quick ad-hoc send (DB path only now).
+class ViewRegistry {
+    views = new Map();
+    currentView = null;
+    static instance = null;
+    static getInstance() {
+        if (!ViewRegistry.instance) {
+            ViewRegistry.instance = new ViewRegistry();
+            console.debug('[ViewRegistry] Created global instance');
+        }
+        return ViewRegistry.instance;
+    }
+    register(view) {
+        this.views.set(view.name, view);
+        console.debug(`[ViewRegistry] Registered view: ${view.name}`);
+    }
+    async showView(viewName, userRoles = []) {
+        const view = this.views.get(viewName);
+        if (!view) {
+            console.warn(`[ViewRegistry] View not found: ${viewName}`);
+            return;
+        }
+        if (!view.canAccess(userRoles)) {
+            console.warn(`[ViewRegistry] Access denied to view: ${viewName}`);
+            return;
+        }
+        // Deactivate current view
+        if (this.currentView) {
+            this.currentView.deactivate();
+        }
+        // Hide all view elements
+        this.views.forEach(v => {
+            const element = document.getElementById(v.elementId);
+            if (element)
+                element.style.display = 'none';
+        });
+        // Show and activate new view
+        const element = document.getElementById(view.elementId);
+        if (element) {
+            element.style.display = 'block';
+            this.currentView = view;
+            await view.activate();
+            // Update navigation
+            document.querySelectorAll('.navBtn').forEach(el => el.classList.toggle('active', el.getAttribute('data-view') === viewName));
+            console.debug(`[ViewRegistry] Switched to view: ${viewName}`);
+        }
+    }
+    getCurrentViewName() {
+        return this.currentView?.name || null;
+    }
+    saveCurrentViewState() {
+        return this.currentView?.saveState() || null;
+    }
+    async restoreViewState(viewName, state) {
+        const view = this.views.get(viewName);
+        if (view && state) {
+            await view.restoreState(state);
+        }
+    }
+}
+// Global helper for dynamic view registration
+function registerView(view) {
+    ViewRegistry.getInstance().register(view);
+}
+class TemplateManager {
+    selectElementId;
+    appId = '';
+    templates = [];
+    onTemplateSelectedCallback;
+    constructor(selectElementId) {
+        this.selectElementId = selectElementId;
+    }
+    setAppId(appId) {
+        this.appId = appId;
+    }
+    setOnTemplateSelected(callback) {
+        this.onTemplateSelectedCallback = callback;
+    }
+    async loadTemplates() {
+        if (!this.appId) {
+            console.warn('[TemplateManager] No appId set');
+            return;
+        }
+        try {
+            this.templates = await api(`/templates?appId=${this.appId}`);
+            this.populateDropdown();
+            console.debug(`[TemplateManager] Loaded ${this.templates.length} templates`);
+        }
+        catch (error) {
+            console.error('[TemplateManager] Failed to load templates:', error);
+        }
+    }
+    populateDropdown() {
+        const select = document.getElementById(this.selectElementId);
+        if (!select)
+            return;
+        select.innerHTML = '<option value="">Select a template...</option>';
+        this.templates.forEach(template => {
+            const option = document.createElement('option');
+            option.value = template.id;
+            option.textContent = template.title || 'Untitled';
+            select.appendChild(option);
+        });
+        // Add change listener
+        select.removeEventListener('change', this.handleTemplateChange);
+        select.addEventListener('change', this.handleTemplateChange);
+    }
+    handleTemplateChange = async () => {
+        const select = document.getElementById(this.selectElementId);
+        if (!select)
+            return;
+        const templateId = select.value;
+        if (templateId) {
+            const template = await this.loadTemplate(templateId);
+            this.onTemplateSelectedCallback?.(template);
+        }
+        else {
+            this.onTemplateSelectedCallback?.(null);
+        }
+    };
+    async loadTemplate(templateId) {
+        const template = await api(`/templates/${templateId}`);
+        // Decode HTML entities in content
+        if (template.content) {
+            template.content = decodeHtmlEntities(template.content);
+        }
+        return template;
+    }
+    getSelectedTemplateId() {
+        const select = document.getElementById(this.selectElementId);
+        return select?.value || '';
+    }
+    setSelectedTemplate(templateId) {
+        const select = document.getElementById(this.selectElementId);
+        if (select) {
+            select.value = templateId;
+            // Trigger the change event to call the onTemplateSelected callback
+            select.dispatchEvent(new Event('change'));
+        }
+    }
+    clearSelection() {
+        const select = document.getElementById(this.selectElementId);
+        if (select) {
+            select.value = '';
+        }
+    }
+    getTemplates() {
+        return [...this.templates];
+    }
+}
+// Utility function to extract tenant ID from app ID
+function extractTenantFromAppId(appId) {
+    // Known app ID to tenant mapping
+    if (appId === 'cmfka688r0001b77ofpgm57ix') {
+        return 'robs-world-tenant';
+    }
+    // Fallback to roleContext or URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    return roleContext.contextTenantId || urlParams.get('tenant');
+}
+class ComposeView {
+    name = 'compose';
+    elementId = 'view-compose';
+    templateManager = new TemplateManager('templateSelect');
+    currentAppId = null;
+    templates = [];
+    previousMessages = [];
+    recipientCount = 0;
+    eventListenersSetup = false;
+    recipientsData = [];
+    isRestoringState = false;
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[ComposeView] Initializing compose view');
+        this.templateManager.setOnTemplateSelected(this.onTemplateSelected.bind(this));
+    }
+    async activate() {
+        console.log('[ComposeView] Activating compose view');
+        // Get appId from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const appIdFromUrl = urlParams.get('appId');
+        const recipientsFromUrl = urlParams.get('recipients');
+        console.log('[ComposeView] URL params - appId:', appIdFromUrl, 'recipients:', recipientsFromUrl);
+        // Handle recipients data if provided
+        if (recipientsFromUrl) {
+            try {
+                this.recipientsData = JSON.parse(decodeURIComponent(recipientsFromUrl));
+                console.log('[ComposeView] Recipients data from URL:', this.recipientsData);
+            }
+            catch (error) {
+                console.warn('[ComposeView] Failed to parse recipients data:', error);
+            }
+        }
+        if (appIdFromUrl) {
+            this.currentAppId = appIdFromUrl;
+            this.templateManager.setAppId(appIdFromUrl);
+            console.log('[ComposeView] Using appId from URL:', appIdFromUrl);
+            // Update URL to clean up parameters while preserving appId
+            const url = new URL(window.location.href);
+            url.searchParams.set('appId', appIdFromUrl);
+            url.searchParams.delete('recipients'); // Clean up after processing
+            history.replaceState(null, '', url.toString());
+            await this.loadComposeData();
+            this.setupComposeEventListeners();
+            // Initialize TinyMCE for rich text editing
+            await this.initTinyMCE();
+            // If recipients were provided in URL, populate them
+            if (this.recipientsData.length > 0) {
+                this.populateRecipientsFromData();
+            }
+        }
+        else {
+            // Check for saved state
+            const savedPageState = localStorage.getItem('pageState');
+            let savedAppId = null;
+            console.log('[ComposeView] No appId in URL, checking saved page state');
+            if (savedPageState) {
+                try {
+                    const parsed = JSON.parse(savedPageState);
+                    savedAppId = parsed.appId;
+                    console.log('[ComposeView] Found appId in saved page state:', savedAppId);
+                }
+                catch (error) {
+                    console.warn('[ComposeView] Failed to parse saved page state:', error);
+                }
+            }
+            if (savedAppId) {
+                this.currentAppId = savedAppId;
+                this.templateManager.setAppId(savedAppId);
+                // Update URL to include the appId
+                const url = new URL(window.location.href);
+                url.searchParams.set('appId', savedAppId);
+                history.replaceState(null, '', url.toString());
+                console.log('[ComposeView] Loading data for saved appId:', savedAppId);
+                await this.loadComposeData();
+                this.setupComposeEventListeners();
+                await this.initTinyMCE();
+            }
+            else {
+                console.warn('[ComposeView] No appId found in URL or saved state');
+            }
+        }
+    }
+    deactivate() {
+        console.log('[ComposeView] Deactivating compose view');
+        this.saveState();
+    }
+    saveState() {
+        if (!this.currentAppId)
+            return null;
+        try {
+            const formData = this.getFormData();
+            // Don't overwrite good state with empty state during page refresh/navigation
+            // This prevents the ViewRegistry deactivation from destroying user's work
+            const hasData = formData.recipients || formData.subject || formData.content ||
+                formData.selectedTemplateId || formData.selectedPreviousMessageId;
+            if (!hasData) {
+                // Check if we already have saved state - don't overwrite it with empty data
+                const existingStateKey = `composeState_${this.currentAppId}`;
+                const existingState = localStorage.getItem(existingStateKey);
+                if (existingState) {
+                    console.log('[ComposeView] Skipping save of empty state to preserve existing data');
+                    try {
+                        return JSON.parse(existingState);
+                    }
+                    catch (error) {
+                        console.warn('[ComposeView] Failed to parse existing state:', error);
+                    }
+                }
+            }
+            const state = {
+                currentAppId: this.currentAppId,
+                templates: this.templates,
+                previousMessages: this.previousMessages,
+                recipientCount: this.recipientCount,
+                formData,
+                lastSaved: Date.now()
+            };
+            localStorage.setItem(`composeState_${this.currentAppId}`, JSON.stringify(state));
+            console.log('[ComposeView] State saved for app:', this.currentAppId, hasData ? '(with data)' : '(empty)');
+            return state;
+        }
+        catch (error) {
+            console.warn('[ComposeView] Failed to save state:', error);
+            return null;
+        }
+    }
+    async restoreState(state) {
+        if (!this.currentAppId)
+            return;
+        // Prevent multiple simultaneous restorations
+        if (this.isRestoringState) {
+            console.log('[ComposeView] Already restoring state, skipping duplicate restoration');
+            return;
+        }
+        this.isRestoringState = true;
+        try {
+            console.log('[ComposeView] Starting state restoration for app:', this.currentAppId);
+            // Always use localStorage as the authoritative source for form state
+            // ViewRegistry just signals us to restore, we manage our own state
+            const savedState = this.loadSavedState(this.currentAppId);
+            if (savedState) {
+                console.log('[ComposeView] Using localStorage state:', savedState);
+                this.currentAppId = savedState.currentAppId;
+                this.templates = savedState.templates || [];
+                this.previousMessages = savedState.previousMessages || [];
+                this.recipientCount = savedState.recipientCount || 0;
+                // Ensure data is loaded first
+                if (!this.templates.length || !this.previousMessages.length) {
+                    console.log('[ComposeView] Loading fresh data before state restoration');
+                    await this.loadComposeData();
+                }
+                // Wait for DOM elements to be available
+                await this.waitForElements();
+                if (savedState.formData) {
+                    console.log('[ComposeView] Restoring form data:', savedState.formData);
+                    // Validate that formData has meaningful content before restoring
+                    const hasData = savedState.formData.recipients || savedState.formData.subject ||
+                        savedState.formData.content || savedState.formData.selectedTemplateId ||
+                        savedState.formData.selectedPreviousMessageId;
+                    if (hasData) {
+                        await this.setFormData(savedState.formData);
+                        this.updateRecipientCount();
+                        console.log('[ComposeView] Form data restored successfully');
+                    }
+                    else {
+                        console.log('[ComposeView] Saved form data is empty, skipping restoration');
+                    }
+                }
+                console.log('[ComposeView] State restored for app:', this.currentAppId);
+            }
+            else {
+                console.log('[ComposeView] No saved state found in localStorage for app:', this.currentAppId);
+            }
+        }
+        catch (error) {
+            console.warn('[ComposeView] Failed to restore state:', error);
+        }
+        finally {
+            this.isRestoringState = false;
+        }
+    }
+    async waitForElements() {
+        // Wait for essential form elements to be available
+        const checkElements = () => {
+            const recipients = document.querySelector('#recipients');
+            const subject = document.querySelector('#subject');
+            const fromAddress = document.querySelector('#fromAddress');
+            const messageContent = document.querySelector('#messageContent');
+            return recipients && subject && fromAddress && messageContent;
+        };
+        if (checkElements())
+            return;
+        // Wait up to 2 seconds for elements to appear
+        for (let i = 0; i < 20; i++) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            if (checkElements())
+                return;
+        }
+        console.warn('[ComposeView] Timeout waiting for form elements');
+    }
+    canAccess(userRoles) {
+        // All authenticated users can access compose view
+        return true;
+    }
+    async initTinyMCE() {
+        await TinyMCEManager.initialize('#messageContent', {
+            height: 400,
+            onContentChange: () => this.saveState()
+        });
+    }
+    async onTemplateSelected(template) {
+        console.log('[ComposeView] Template selected:', template);
+        if (!template) {
+            this.clearTemplateContent();
+            return;
+        }
+        // Update form with template data
+        const subjectInput = document.querySelector('#subject');
+        const contentTextarea = document.querySelector('#messageContent');
+        if (subjectInput) {
+            subjectInput.value = template.subject || '';
+        }
+        console.log('[ComposeView] About to set template content:', template.content);
+        if (contentTextarea) {
+            TinyMCEManager.setContent('#messageContent', template.content || '');
+        }
+        // Save state after setting template data
+        this.saveState();
+    }
+    async onPreviousMessageSelected(event) {
+        const select = event.target;
+        const messageId = select.value;
+        console.log('[ComposeView] Previous message selected, messageId:', messageId);
+        if (!messageId) {
+            return;
+        }
+        try {
+            // Fetch the full message content by messageId
+            const messageContent = await api(`/api/previous-message/${messageId}`);
+            console.log('[ComposeView] Fetched previous message content:', messageContent);
+            // Populate form with the previous message data
+            const subjectInput = document.querySelector('#subject');
+            const contentTextarea = document.querySelector('#messageContent');
+            if (subjectInput && messageContent.subject) {
+                subjectInput.value = messageContent.subject;
+            }
+            console.log('[ComposeView] About to set previous message content:', messageContent.message);
+            if (contentTextarea && messageContent.message) {
+                TinyMCEManager.setContent('#messageContent', messageContent.message);
+            }
+            console.log('[ComposeView] Loaded previous message:', messageContent.subject);
+            // Save state after setting previous message data
+            this.saveState();
+        }
+        catch (error) {
+            console.error('[ComposeView] Failed to load previous message:', error);
+        }
+    }
+    clearTemplateContent() {
+        const subjectInput = document.querySelector('#subject');
+        const contentTextarea = document.querySelector('#messageContent');
+        if (subjectInput) {
+            subjectInput.value = '';
+        }
+        if (contentTextarea) {
+            TinyMCEManager.setContent('#messageContent', '');
+        }
+    }
+    async loadComposeData() {
+        if (!this.currentAppId) {
+            console.warn('[ComposeView] No appId available for loading data');
+            return;
+        }
+        try {
+            // Load templates using TemplateManager
+            await this.templateManager.loadTemplates();
+            this.templates = this.templateManager.getTemplates();
+            // Load previous messages
+            this.previousMessages = await api(`/api/previous-messages?appId=${this.currentAppId}`);
+            this.populatePreviousMessagesDropdown();
+            // Load SMTP from address with reliable tenant ID resolution
+            const tenantId = extractTenantFromAppId(this.currentAppId);
+            console.log('[ComposeView] Resolved tenant ID:', tenantId, 'for app:', this.currentAppId);
+            const fromAddressInput = document.querySelector('#fromAddress');
+            try {
+                const smtpConfig = await api(`/smtp-configs/effective?scope=APP&tenantId=${tenantId}&appId=${this.currentAppId}`);
+                if (fromAddressInput) {
+                    if (smtpConfig?.fromAddress) {
+                        fromAddressInput.value = smtpConfig.fromAddress;
+                    }
+                    else {
+                        fromAddressInput.value = '';
+                        fromAddressInput.placeholder = 'No SMTP config found - enter from address';
+                    }
+                }
+            }
+            catch (error) {
+                console.warn('[ComposeView] Failed to load SMTP config:', error);
+                if (fromAddressInput) {
+                    fromAddressInput.value = '';
+                    fromAddressInput.placeholder = 'SMTP config unavailable - enter from address';
+                }
+            }
+            console.log('[ComposeView] Data loaded successfully');
+        }
+        catch (error) {
+            console.error('[ComposeView] Failed to load data:', error);
+        }
+    }
+    populatePreviousMessagesDropdown() {
+        const select = document.querySelector('#previousMessageSelect');
+        if (!select)
+            return;
+        select.innerHTML = '<option value="">Select a previous message...</option>';
+        this.previousMessages.forEach((message) => {
+            const option = document.createElement('option');
+            option.value = message.messageId; // Use messageId instead of id
+            // Handle different date field names and formats
+            let dateStr = '(Unknown Date)';
+            const dateValue = message.sent || message.sentAt || message.createdAt || message.timestamp;
+            if (dateValue) {
+                try {
+                    const date = new Date(dateValue);
+                    if (!isNaN(date.getTime())) {
+                        dateStr = `(${date.toLocaleDateString()})`;
+                    }
+                }
+                catch (error) {
+                    console.warn('[ComposeView] Failed to parse date:', dateValue, error);
+                }
+            }
+            option.textContent = `${message.subject || 'No Subject'} ${dateStr}`;
+            select.appendChild(option);
+        });
+    }
+    setupComposeEventListeners() {
+        if (this.eventListenersSetup)
+            return;
+        // Auto-save functionality with debouncing
+        const debouncedSave = this.debounce(() => {
+            this.saveState();
+        }, 2000);
+        // Add event listeners to form elements
+        const recipients = document.querySelector('#recipients');
+        const subject = document.querySelector('#subject');
+        const fromAddress = document.querySelector('#fromAddress');
+        if (recipients) {
+            recipients.addEventListener('input', () => {
+                this.updateRecipientCount();
+                debouncedSave();
+            });
+        }
+        if (subject) {
+            subject.addEventListener('input', debouncedSave);
+        }
+        if (fromAddress) {
+            fromAddress.addEventListener('input', debouncedSave);
+        }
+        // Previous message selection handler
+        const previousSelect = document.querySelector('#previousMessageSelect');
+        if (previousSelect) {
+            previousSelect.addEventListener('change', this.onPreviousMessageSelected.bind(this));
+        }
+        this.eventListenersSetup = true;
+        console.log('[ComposeView] Event listeners setup complete');
+    }
+    debounce(func, wait) {
+        let timeout;
+        return () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this), wait);
+        };
+    }
+    loadSavedState(appId) {
+        try {
+            const saved = localStorage.getItem(`composeState_${appId}`);
+            if (!saved)
+                return null;
+            const parsed = JSON.parse(saved);
+            // Check if state is too old (older than 24 hours)
+            const maxAge = 24 * 60 * 60 * 1000;
+            if (Date.now() - parsed.lastSaved > maxAge) {
+                localStorage.removeItem(`composeState_${appId}`);
+                return null;
+            }
+            return parsed;
+        }
+        catch (error) {
+            console.warn('[ComposeView] Failed to load saved state:', error);
+            return null;
+        }
+    }
+    getFormData() {
+        const recipients = document.querySelector('#recipients');
+        const subject = document.querySelector('#subject');
+        const fromAddress = document.querySelector('#fromAddress');
+        return {
+            recipients: recipients?.value || '',
+            subject: subject?.value || '',
+            content: this.getTinyMCEContent(),
+            fromAddress: fromAddress?.value || '',
+            selectedTemplateId: this.templateManager.getSelectedTemplateId(),
+            selectedPreviousMessageId: document.querySelector('#previousMessageSelect')?.value || ''
+        };
+    }
+    async setFormData(formData) {
+        console.log('[ComposeView] Setting form data:', formData);
+        const recipients = document.querySelector('#recipients');
+        const subject = document.querySelector('#subject');
+        const fromAddress = document.querySelector('#fromAddress');
+        if (recipients && formData.recipients) {
+            recipients.value = formData.recipients;
+            console.log('[ComposeView] Set recipients:', formData.recipients);
+        }
+        if (subject && formData.subject) {
+            subject.value = formData.subject;
+            console.log('[ComposeView] Set subject:', formData.subject);
+        }
+        if (formData.content) {
+            console.log('[ComposeView] Setting content, waiting for TinyMCE readiness...');
+            await this.waitForTinyMCE();
+            TinyMCEManager.setContent('#messageContent', formData.content);
+            console.log('[ComposeView] Content set');
+        }
+        if (fromAddress && formData.fromAddress) {
+            fromAddress.value = formData.fromAddress;
+            console.log('[ComposeView] Set fromAddress:', formData.fromAddress);
+        }
+        if (formData.selectedTemplateId) {
+            console.log('[ComposeView] Restoring template selection:', formData.selectedTemplateId);
+            // Set dropdown value directly without triggering change event that would reload content
+            const templateSelect = document.getElementById('templateSelect');
+            if (templateSelect) {
+                templateSelect.value = formData.selectedTemplateId;
+            }
+        }
+        if (formData.selectedPreviousMessageId) {
+            console.log('[ComposeView] Restoring previous message selection:', formData.selectedPreviousMessageId);
+            // Set dropdown value directly without triggering change event
+            const previousSelect = document.querySelector('#previousMessageSelect');
+            if (previousSelect) {
+                previousSelect.value = formData.selectedPreviousMessageId;
+            }
+        }
+    }
+    async waitForTinyMCE() {
+        const maxWaitTime = 5000; // 5 seconds max wait
+        const checkInterval = 100; // Check every 100ms
+        const startTime = Date.now();
+        return new Promise((resolve) => {
+            const checkReady = () => {
+                if (TinyMCEManager.isReady('#messageContent')) {
+                    console.log('[ComposeView] TinyMCE is ready');
+                    resolve();
+                    return;
+                }
+                if (Date.now() - startTime > maxWaitTime) {
+                    console.warn('[ComposeView] TinyMCE readiness timeout, proceeding anyway');
+                    resolve();
+                    return;
+                }
+                setTimeout(checkReady, checkInterval);
+            };
+            checkReady();
+        });
+    }
+    getTinyMCEContent() {
+        return TinyMCEManager.getContent('#messageContent');
+    }
+    updateRecipientCount() {
+        const recipients = document.querySelector('#recipients');
+        const countElement = document.querySelector('#addressCount');
+        if (!recipients || !countElement)
+            return;
+        const addresses = recipients.value.split(/[,;\n]/).map(addr => addr.trim()).filter(addr => addr.length > 0);
+        this.recipientCount = addresses.length;
+        countElement.textContent = this.recipientCount.toString();
+    }
+    populateRecipientsFromData() {
+        if (this.recipientsData.length === 0)
+            return;
+        const recipients = document.querySelector('#recipients');
+        if (!recipients)
+            return;
+        const emailAddresses = this.recipientsData.map(r => r.email).join(', ');
+        recipients.value = emailAddresses;
+        this.updateRecipientCount();
+        console.log('[ComposeView] Populated recipients from URL data');
+    }
+}
+class TemplateEditorView {
+    name = 'template-editor';
+    elementId = 'view-template-editor';
+    templateManager = new TemplateManager('templateEditorSelect');
+    currentAppId = '';
+    returnUrl = '';
+    currentTemplate = null;
+    isEditMode = false;
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[TemplateEditorView] Initializing template editor view');
+        this.templateManager.setOnTemplateSelected(this.onTemplateSelected.bind(this));
+    }
+    async activate() {
+        console.log('[TemplateEditorView] Activating template editor view');
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        this.returnUrl = urlParams.get('returnUrl') || '';
+        this.currentAppId = urlParams.get('appId') || appId;
+        if (this.currentAppId) {
+            this.templateManager.setAppId(this.currentAppId);
+            await this.loadData();
+            this.setupEventListeners();
+            await this.initTinyMCE();
+        }
+    }
+    deactivate() {
+        console.log('[TemplateEditorView] Deactivating template editor view');
+        this.saveState();
+    }
+    saveState() {
+        console.log('[TemplateEditorView] saveState called, currentTemplate:', this.currentTemplate);
+        console.log('[TemplateEditorView] saveState called, currentAppId:', this.currentAppId);
+        const formData = this.getFormData();
+        console.log('[TemplateEditorView] saveState formData:', formData);
+        // Don't overwrite saved state if we have no meaningful data
+        // This prevents empty state from overwriting good state during page refresh
+        if (!this.currentTemplate && !formData.title && !formData.subject && !formData.content) {
+            console.log('[TemplateEditorView] Skipping save of empty state to preserve existing saved state');
+            return null;
+        }
+        const state = {
+            currentAppId: this.currentAppId,
+            returnUrl: this.returnUrl,
+            currentTemplateId: this.currentTemplate?.id,
+            isEditMode: this.isEditMode,
+            formData: formData,
+            lastSaved: Date.now()
+        };
+        console.log('[TemplateEditorView] saveState final state:', state);
+        if (this.currentAppId) {
+            localStorage.setItem(`templateEditorState_${this.currentAppId}`, JSON.stringify(state));
+            console.log('[TemplateEditorView] State saved');
+        }
+        return state;
+    }
+    async restoreState(state) {
+        if (!state)
+            return;
+        try {
+            console.log('[TemplateEditorView] Restoring state:', state);
+            this.currentAppId = state.currentAppId || '';
+            this.returnUrl = state.returnUrl || '';
+            this.isEditMode = state.isEditMode || false;
+            if (state.currentTemplateId) {
+                console.log('[TemplateEditorView] Restoring template:', state.currentTemplateId);
+                // Set the dropdown selection (this will trigger template loading)
+                this.templateManager.setSelectedTemplate(state.currentTemplateId);
+                // Wait for template to load, then restore form data
+                if (state.formData) {
+                    this.waitForTemplateAndRestore(state.formData);
+                }
+            }
+            else if (state.formData) {
+                console.log('[TemplateEditorView] Restoring form data:', state.formData);
+                await this.setFormData(state.formData);
+            }
+            console.log('[TemplateEditorView] State restored');
+        }
+        catch (error) {
+            console.warn('[TemplateEditorView] Failed to restore state:', error);
+        }
+    }
+    async waitForTemplateAndRestore(formData) {
+        // Wait for both template to load and TinyMCE to be ready
+        let attempts = 0;
+        const maxAttempts = 20; // 2 seconds max
+        const waitForReady = () => {
+            return new Promise((resolve) => {
+                const checkReady = async () => {
+                    attempts++;
+                    // Check if template is loaded and TinyMCE is ready
+                    const isTemplateLoaded = this.currentTemplate !== null;
+                    const isTinyMCEReady = window.tinymce && window.tinymce.get('templateContent') &&
+                        window.tinymce.get('templateContent').initialized;
+                    if ((isTemplateLoaded && isTinyMCEReady) || attempts >= maxAttempts) {
+                        console.log('[TemplateEditorView] Template ready, restoring form data:', formData);
+                        await this.setFormData(formData);
+                        resolve();
+                    }
+                    else {
+                        setTimeout(checkReady, 100);
+                    }
+                };
+                setTimeout(checkReady, 50); // Initial delay
+            });
+        };
+        await waitForReady();
+    }
+    canAccess(userRoles) {
+        return userRoles.includes('tenant_admin') || userRoles.includes('superadmin');
+    }
+    async onTemplateSelected(template) {
+        if (template) {
+            await this.loadTemplateForEditing(template.id);
+        }
+        else {
+            this.clearForm();
+        }
+    }
+    async loadData() {
+        if (!this.currentAppId) {
+            console.warn('[TemplateEditorView] No appId available');
+            return;
+        }
+        try {
+            await this.templateManager.loadTemplates();
+            console.log('[TemplateEditorView] Data loaded successfully');
+        }
+        catch (error) {
+            console.error('[TemplateEditorView] Failed to load data:', error);
+            this.showStatus('Error loading templates: ' + error.message);
+        }
+    }
+    setupEventListeners() {
+        const saveNewBtn = document.getElementById('saveNewTemplateBtn');
+        const updateBtn = document.getElementById('updateTemplateBtn');
+        const deleteBtn = document.getElementById('deleteTemplateBtn');
+        const cancelBtn = document.getElementById('cancelTemplateEditBtn');
+        // Remove existing event listeners to prevent duplicates
+        if (saveNewBtn) {
+            saveNewBtn.replaceWith(saveNewBtn.cloneNode(true));
+            const newSaveNewBtn = document.getElementById('saveNewTemplateBtn');
+            newSaveNewBtn.addEventListener('click', () => this.saveNewTemplate());
+        }
+        if (updateBtn) {
+            updateBtn.replaceWith(updateBtn.cloneNode(true));
+            const newUpdateBtn = document.getElementById('updateTemplateBtn');
+            newUpdateBtn.addEventListener('click', () => this.updateExistingTemplate());
+        }
+        if (deleteBtn) {
+            deleteBtn.replaceWith(deleteBtn.cloneNode(true));
+            const newDeleteBtn = document.getElementById('deleteTemplateBtn');
+            newDeleteBtn.addEventListener('click', () => this.deleteTemplate());
+        }
+        if (cancelBtn) {
+            cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+            const newCancelBtn = document.getElementById('cancelTemplateEditBtn');
+            newCancelBtn.addEventListener('click', () => this.cancelEditing());
+        }
+        // Add listeners to save state when form changes
+        const titleInput = document.getElementById('templateTitle');
+        const subjectInput = document.getElementById('templateSubject');
+        if (titleInput) {
+            titleInput.addEventListener('input', () => this.saveState());
+        }
+        if (subjectInput) {
+            subjectInput.addEventListener('input', () => this.saveState());
+        }
+        // Note: TinyMCE content changes will be handled through TinyMCE events in initTinyMCE
+    }
+    async initTinyMCE() {
+        await TinyMCEManager.initialize('#templateContent', {
+            height: 400,
+            onContentChange: () => this.saveState()
+        });
+    }
+    async loadTemplateForEditing(templateId) {
+        try {
+            this.currentTemplate = await this.templateManager.loadTemplate(templateId);
+            this.isEditMode = true;
+            // Populate form fields
+            const titleInput = document.getElementById('templateTitle');
+            const subjectInput = document.getElementById('templateSubject');
+            if (titleInput)
+                titleInput.value = this.currentTemplate.title;
+            if (subjectInput)
+                subjectInput.value = this.currentTemplate.subject || '';
+            // Set TinyMCE content (already decoded by TemplateManager)
+            TinyMCEManager.setContent('#templateContent', this.currentTemplate.content || '', false);
+            // Show/hide buttons
+            this.updateButtonVisibility();
+            // Save state immediately after loading template
+            this.saveState();
+            console.log('[TemplateEditorView] Loaded template for editing:', this.currentTemplate.title);
+        }
+        catch (error) {
+            console.error('[TemplateEditorView] Failed to load template:', error);
+            this.showStatus('Error loading template: ' + error.message);
+        }
+    }
+    clearForm() {
+        this.currentTemplate = null;
+        this.isEditMode = false;
+        const titleInput = document.getElementById('templateTitle');
+        const subjectInput = document.getElementById('templateSubject');
+        if (titleInput)
+            titleInput.value = '';
+        if (subjectInput)
+            subjectInput.value = '';
+        // Clear TinyMCE content
+        TinyMCEManager.setContent('#templateContent', '');
+        this.updateButtonVisibility();
+    }
+    updateButtonVisibility() {
+        const saveNewBtn = document.getElementById('saveNewTemplateBtn');
+        const updateBtn = document.getElementById('updateTemplateBtn');
+        const deleteBtn = document.getElementById('deleteTemplateBtn');
+        if (saveNewBtn)
+            saveNewBtn.style.display = 'inline-block';
+        if (updateBtn)
+            updateBtn.style.display = this.isEditMode ? 'inline-block' : 'none';
+        if (deleteBtn)
+            deleteBtn.style.display = this.isEditMode ? 'inline-block' : 'none';
+    }
+    async saveNewTemplate() {
+        const formData = this.getFormData();
+        if (!formData.title.trim()) {
+            this.showStatus('Template title is required');
+            return;
+        }
+        try {
+            const newTemplate = await api('/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    appId: this.currentAppId,
+                    title: formData.title,
+                    subject: formData.subject,
+                    content: formData.content
+                })
+            });
+            this.showStatus('Template saved successfully');
+            await this.loadData(); // Refresh dropdown
+            if (this.returnUrl) {
+                window.location.href = this.returnUrl;
+            }
+        }
+        catch (error) {
+            console.error('[TemplateEditorView] Failed to save template:', error);
+            this.showStatus('Error saving template: ' + error.message);
+        }
+    }
+    async updateExistingTemplate() {
+        if (!this.currentTemplate) {
+            this.showStatus('No template selected for update');
+            return;
+        }
+        const formData = this.getFormData();
+        if (!formData.title.trim()) {
+            this.showStatus('Template title is required');
+            return;
+        }
+        try {
+            await api(`/templates/${this.currentTemplate.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: formData.title,
+                    subject: formData.subject,
+                    content: formData.content
+                })
+            });
+            this.showStatus('Template updated successfully');
+            await this.loadData(); // Refresh dropdown
+            if (this.returnUrl) {
+                window.location.href = this.returnUrl;
+            }
+        }
+        catch (error) {
+            console.error('[TemplateEditorView] Failed to update template:', error);
+            this.showStatus('Error updating template: ' + error.message);
+        }
+    }
+    async deleteTemplate() {
+        if (!this.currentTemplate) {
+            this.showStatus('No template selected for deletion');
+            return;
+        }
+        const confirmMessage = `Are you sure you want to delete the template "${this.currentTemplate.title}"? This action cannot be undone.`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        try {
+            await api(`/templates/${this.currentTemplate.id}/deactivate`, {
+                method: 'PATCH',
+                body: JSON.stringify({})
+            });
+            this.showStatus('Template deleted successfully');
+            // Clear the form and reset state
+            this.clearForm();
+            this.currentTemplate = null;
+            this.isEditMode = false;
+            this.updateButtonVisibility();
+            // Refresh the dropdown to remove the deleted template
+            await this.loadData();
+            // Reset dropdown to "Create New Template"
+            const select = document.getElementById('templateEditorSelect');
+            if (select) {
+                select.value = '';
+            }
+        }
+        catch (error) {
+            console.error('[TemplateEditorView] Failed to delete template:', error);
+            this.showStatus('Error deleting template: ' + error.message);
+        }
+    }
+    cancelEditing() {
+        if (this.returnUrl) {
+            window.location.href = this.returnUrl;
+        }
+        else {
+            // Clear form and show compose or apps view
+            this.clearForm();
+        }
+    }
+    getFormData() {
+        const titleInput = document.getElementById('templateTitle');
+        const subjectInput = document.getElementById('templateSubject');
+        let content = TinyMCEManager.getContent('#templateContent');
+        return {
+            title: titleInput?.value || '',
+            subject: subjectInput?.value || '',
+            content
+        };
+    }
+    async setFormData(formData) {
+        const titleInput = document.getElementById('templateTitle');
+        const subjectInput = document.getElementById('templateSubject');
+        if (titleInput && formData.title)
+            titleInput.value = formData.title;
+        if (subjectInput && formData.subject)
+            subjectInput.value = formData.subject;
+        if (formData.content) {
+            TinyMCEManager.setContent('#templateContent', formData.content, false);
+        }
+    }
+    showStatus(message) {
+        const statusElement = document.getElementById('templateEditorStatus');
+        if (statusElement) {
+            statusElement.textContent = message;
+            setTimeout(() => {
+                statusElement.textContent = '';
+            }, 5000);
+        }
+    }
+}
+// Simple View classes for remaining views
+class AppsView {
+    name = 'apps';
+    elementId = 'view-apps';
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[AppsView] Initializing apps view');
+    }
+    async activate() {
+        console.log('[AppsView] Activating apps view');
+        // Update title
+        const titleElement = document.getElementById('viewTitle');
+        if (titleElement) {
+            titleElement.textContent = getAppsViewTitle();
+        }
+        // Load apps for current context
+        loadAppsForCurrentContext();
+    }
+    deactivate() {
+        console.log('[AppsView] Deactivating apps view');
+    }
+    saveState() {
+        return {}; // Apps view doesn't need state persistence
+    }
+    async restoreState(state) {
+        // No state to restore for apps view
+    }
+    canAccess(userRoles) {
+        return true; // All authenticated users can see apps
+    }
+}
+class TenantsView {
+    name = 'tenants';
+    elementId = 'view-tenants';
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[TenantsView] Initializing tenants view');
+    }
+    async activate() {
+        console.log('[TenantsView] Activating tenants view');
+        // Update title
+        const titleElement = document.getElementById('viewTitle');
+        if (titleElement) {
+            titleElement.textContent = 'Tenant Management';
+        }
+        // Load tenants
+        await loadTenants();
+    }
+    deactivate() {
+        console.log('[TenantsView] Deactivating tenants view');
+    }
+    saveState() {
+        return {}; // Tenants view doesn't need state persistence
+    }
+    async restoreState(state) {
+        // No state to restore for tenants view
+    }
+    canAccess(userRoles) {
+        return userRoles.includes('superadmin');
+    }
+}
+class SmtpConfigView {
+    name = 'smtp-config';
+    elementId = 'view-smtp-config';
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[SmtpConfigView] Initializing SMTP config view');
+    }
+    async activate() {
+        console.log('[SmtpConfigView] Activating SMTP config view');
+        // Update title
+        const titleElement = document.getElementById('viewTitle');
+        if (titleElement) {
+            titleElement.textContent = 'Configuration';
+        }
+        // Load and display configs
+        console.log('SMTP Config view shown, loading configurations...');
+        loadAndDisplayConfigs();
+    }
+    deactivate() {
+        console.log('[SmtpConfigView] Deactivating SMTP config view');
+    }
+    saveState() {
+        return {}; // SMTP config view doesn't need state persistence
+    }
+    async restoreState(state) {
+        // No state to restore for SMTP config view
+    }
+    canAccess(userRoles) {
+        return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
+    }
+}
 // Check if we're returning from IDP (has token parameter)
 const url = new URL(window.location.href);
 const hasTokenFromIdp = !!url.searchParams.get('token');
@@ -21,6 +1130,12 @@ const state = {
     dbMode: true,
     user: null,
 };
+// Helper function to get current app ID
+function getCurrentAppId() {
+    // Try URL params first, then fall back to global appId
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('appId') || appId;
+}
 function $(sel) { return document.querySelector(sel); }
 function showStatusMessage(el, msg) { el.textContent = msg; setTimeout(() => { if (el.textContent === msg)
     el.textContent = ''; }, 6000); }
@@ -30,6 +1145,102 @@ function decodeHtmlEntities(text) {
     const textarea = document.createElement('textarea');
     textarea.innerHTML = text;
     return textarea.value;
+}
+class TinyMCEManager {
+    static instances = new Map();
+    static async initialize(selector, options = {}) {
+        const elementId = selector.replace('#', '');
+        console.log(`[TinyMCEManager] Initializing TinyMCE for ${elementId}`);
+        if (!window.tinymce) {
+            console.warn(`[TinyMCEManager] TinyMCE not available in window object`);
+            return;
+        }
+        if (this.instances.get(elementId)) {
+            console.log(`[TinyMCEManager] TinyMCE already initialized for ${elementId}`);
+            return;
+        }
+        await window.tinymce.init({
+            selector,
+            height: options.height || 400,
+            menubar: false,
+            plugins: 'advlist autolink lists link image charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime media table help wordcount',
+            toolbar: 'undo redo | formatselect | bold italic underline | \
+               alignleft aligncenter alignright alignjustify | \
+               bullist numlist outdent indent | removeformat | help',
+            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, sans-serif; font-size: 14px; }',
+            setup: (editor) => {
+                console.log(`[TinyMCEManager] Editor setup complete for: ${editor.id}`);
+                editor.on('change input', () => {
+                    if (options.onContentChange) {
+                        options.onContentChange();
+                    }
+                });
+            }
+        });
+        this.instances.set(elementId, true);
+        console.log(`[TinyMCEManager] TinyMCE initialization complete for ${elementId}`);
+    }
+    static setContent(selector, content, decode = true) {
+        const elementId = selector.replace('#', '');
+        const processedContent = decode ? decodeHtmlEntities(content) : content;
+        console.log(`[TinyMCEManager] Setting content for ${elementId} - original:`, content);
+        console.log(`[TinyMCEManager] Setting content for ${elementId} - processed:`, processedContent);
+        // Try to use TinyMCE API if available
+        if (window.tinymce && window.tinymce.get(elementId)) {
+            console.log(`[TinyMCEManager] TinyMCE available for ${elementId}, setting content`);
+            window.tinymce.get(elementId).setContent(processedContent);
+            console.log(`[TinyMCEManager] Content set via TinyMCE for ${elementId}`);
+            // Verify what TinyMCE actually has after setting
+            setTimeout(() => {
+                const actualContent = window.tinymce.get(elementId).getContent();
+                console.log(`[TinyMCEManager] TinyMCE content after setting for ${elementId}:`, actualContent);
+            }, 100);
+        }
+        else {
+            console.log(`[TinyMCEManager] TinyMCE not available for ${elementId}, using textarea fallback`);
+            const textarea = document.querySelector(selector);
+            if (textarea) {
+                textarea.value = processedContent;
+                console.log(`[TinyMCEManager] Content set via textarea for ${elementId}`);
+                // If TinyMCE becomes available later, update it
+                setTimeout(() => {
+                    if (window.tinymce && window.tinymce.get(elementId)) {
+                        console.log(`[TinyMCEManager] TinyMCE became available for ${elementId}, updating with content`);
+                        window.tinymce.get(elementId).setContent(processedContent);
+                    }
+                }, 1000);
+            }
+        }
+    }
+    static getContent(selector) {
+        const elementId = selector.replace('#', '');
+        if (window.tinymce && window.tinymce.get(elementId)) {
+            return window.tinymce.get(elementId).getContent();
+        }
+        else {
+            const textarea = document.querySelector(selector);
+            return textarea?.value || '';
+        }
+    }
+    static isReady(selector) {
+        const elementId = selector.replace('#', '');
+        const isInitialized = this.instances.get(elementId) || false;
+        const hasEditor = window.tinymce && window.tinymce.get(elementId);
+        const editorReady = hasEditor && window.tinymce.get(elementId).initialized;
+        return isInitialized && hasEditor && editorReady;
+    }
+    static isInitialized(selector) {
+        const elementId = selector.replace('#', '');
+        return this.instances.get(elementId) || false;
+    }
+    static destroy(selector) {
+        const elementId = selector.replace('#', '');
+        if (window.tinymce && window.tinymce.get(elementId)) {
+            window.tinymce.get(elementId).destroy();
+            this.instances.delete(elementId);
+            console.log(`[TinyMCEManager] Destroyed TinyMCE instance for ${elementId}`);
+        }
+    }
 }
 async function api(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
@@ -43,6 +1254,23 @@ async function api(path, opts = {}) {
     });
     const res = await fetch(path, { ...opts, headers });
     if (!res.ok) {
+        // Handle 401 Unauthorized by redirecting to IDP
+        if (res.status === 401) {
+            console.log('🔒 API returned 401 Unauthorized, redirecting to IDP for re-authentication...');
+            // Clear expired token
+            authToken = null;
+            localStorage.removeItem('authToken');
+            // Redirect to IDP
+            const idp = uiConfig.idpLoginUrl;
+            if (idp) {
+                const ret = uiConfig.returnUrl || (window.location.origin + '/ui/');
+                const redirect = new URL(idp);
+                redirect.searchParams.set('return', ret);
+                redirect.searchParams.set('appId', 'cmfka688r0001b77ofpgm57ix');
+                window.location.href = redirect.toString();
+                return; // Don't throw error, redirect instead
+            }
+        }
         const tx = await res.text();
         throw new Error(tx || res.statusText);
     }
@@ -476,6 +1704,7 @@ function onAuthenticated(cameFromIdp = false) {
             if (tenantId)
                 await listGroups();
         }
+        await initializeViews();
         wireNav();
         wireAppManagement();
     });
@@ -827,6 +2056,7 @@ function updateNavigationVisibility() {
     const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
     const appsNavBtn = document.querySelector('[data-view="apps"]');
     const tenantsNavBtn = document.querySelector('[data-view="tenants"]');
+    const templateEditorNavBtn = document.querySelector('[data-view="template-editor"]');
     const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]');
     if (appsNavBtn) {
         // Apps button visible for tenant_admin and superadmin (in any context)
@@ -835,6 +2065,10 @@ function updateNavigationVisibility() {
     if (tenantsNavBtn) {
         // Tenants button only visible for superadmin outside tenant context
         tenantsNavBtn.style.display = (roles.includes('superadmin') && !roleContext.isInTenantContext) ? 'block' : 'none';
+    }
+    if (templateEditorNavBtn) {
+        // Template Editor button visible for tenant_admin and superadmin (in any context)
+        templateEditorNavBtn.style.display = (roles.includes('tenant_admin') || roles.includes('superadmin')) ? 'block' : 'none';
     }
     if (smtpConfigBtn) {
         // SMTP Config button hidden for editor-only users
@@ -947,55 +2181,48 @@ function wireAppManagement() {
 function showView(view) {
     const roles = state.user?.roles || [];
     const isEditorOnly = roles.includes('editor') && !roles.some((r) => r === 'tenant_admin' || r === 'superadmin');
+    const isTenantAdmin = roles.includes('tenant_admin') || roles.includes('superadmin');
     // Restrict editor-only users to compose view only
     if (isEditorOnly && view !== 'compose') {
         console.log(`[ui-auth] Editor-only user attempted to access ${view}, redirecting to compose`);
         view = 'compose';
     }
-    (document.getElementById('view-tenants')).style.display = view === 'tenants' ? 'grid' : 'none';
-    (document.getElementById('view-compose')).style.display = view === 'compose' ? 'grid' : 'none';
-    (document.getElementById('view-smtp-config')).style.display = view === 'smtp-config' ? 'block' : 'none';
-    (document.getElementById('view-apps')).style.display = view === 'apps' ? 'block' : 'none';
-    document.querySelectorAll('.navBtn').forEach(el => el.classList.toggle('active', el.getAttribute('data-view') === view));
-    // Update title with corrected names
-    let title;
-    if (view === 'tenants') {
-        title = 'Tenant Management';
+    // Restrict template editor to tenant admins only
+    if (view === 'template-editor' && !isTenantAdmin) {
+        console.log(`[ui-auth] Non-tenant-admin user attempted to access template editor, redirecting to compose`);
+        view = 'compose';
     }
-    else if (view === 'smtp-config') {
-        title = 'Configuration'; // Renamed from "SMTP Configuration"
-    }
-    else if (view === 'apps') {
-        title = getAppsViewTitle();
-    }
-    else {
-        title = composeHeaderTitle();
-    }
-    (document.getElementById('viewTitle')).textContent = title;
-    // When SMTP config view is shown, load and display configs
-    if (view === 'smtp-config') {
-        console.log('SMTP Config view shown, loading configurations...');
-        loadAndDisplayConfigs();
-    }
-    // When Apps view is shown, load apps for current tenant context
-    if (view === 'apps') {
-        loadAppsForCurrentContext();
-    }
-    // When Compose view is shown, initialize compose interface
-    if (view === 'compose') {
-        initComposeInterface();
-    }
+    // All views are now managed by ViewRegistry - delegate everything
+    viewRegistry.showView(view, roles);
+}
+// Global view registry instance
+const viewRegistry = ViewRegistry.getInstance();
+async function initializeViews() {
+    console.log('[ViewRegistry] Initializing views...');
+    // Create view instances (they auto-register themselves in their constructors)
+    const composeView = new ComposeView();
+    const templateEditorView = new TemplateEditorView();
+    const appsView = new AppsView();
+    const tenantsView = new TenantsView();
+    const smtpConfigView = new SmtpConfigView();
+    // Initialize all views
+    await composeView.initialize();
+    await templateEditorView.initialize();
+    await appsView.initialize();
+    await tenantsView.initialize();
+    await smtpConfigView.initialize();
+    console.log('[ViewRegistry] Views initialized and registered');
 }
 function wireNav() {
-    document.querySelectorAll('button.navBtn').forEach(btn => btn.addEventListener('click', () => {
-        showView(btn.dataset.view);
+    const roles = state.user?.roles || [];
+    document.querySelectorAll('button.navBtn').forEach(btn => btn.addEventListener('click', async () => {
+        await viewRegistry.showView(btn.dataset.view, roles);
         savePageState();
     }));
     // Check for view parameter in URL first
     const urlParams = new URLSearchParams(window.location.search);
     const requestedView = urlParams.get('view');
     // Determine the appropriate default view
-    const roles = state.user?.roles || [];
     const isSuperadmin = roles.includes('superadmin');
     let defaultView = 'compose'; // Default for tenant admins and editors
     if (isSuperadmin && !roleContext.isInTenantContext) {
@@ -1004,7 +2231,7 @@ function wireNav() {
     }
     // Use URL parameter if provided, otherwise use default
     const viewToShow = requestedView || defaultView;
-    showView(viewToShow);
+    viewRegistry.showView(viewToShow, roles);
 }
 // Manage Tenants button (in compose context panel)
 document.getElementById('goToTenantsBtn')?.addEventListener('click', () => showView('tenants'));
@@ -1319,21 +2546,23 @@ async function init() {
         if (tenantId)
             await listGroups();
     }
-    wireNav();
+    // wireNav() is already called in onAuthenticated() - no need to call again
     wireAppManagement();
     setupSmtpConfig();
     // Set up browser history handling
     setupHistoryHandling();
     // Restore page state after everything is loaded and set up
     // Use setTimeout to ensure all DOM updates are complete
-    setTimeout(() => {
-        restorePageState();
+    setTimeout(async () => {
+        await restorePageState();
     }, 100);
 }
 function savePageState() {
     try {
         const currentView = getCurrentView();
         const inTenantContext = roleContext.isInTenantContext;
+        // Get view-specific state from ViewRegistry
+        const viewState = viewRegistry.saveCurrentViewState();
         const state = {
             currentView: currentView,
             tenantId: tenantId || undefined,
@@ -1341,7 +2570,8 @@ function savePageState() {
             smtpConfigView: document.getElementById('view-smtp-config')?.style.display !== 'none',
             inTenantContext: inTenantContext,
             contextType: inTenantContext ? 'tenant' : 'global',
-            appId: composeState?.currentAppId || undefined
+            appId: getAppIdFromViewState(currentView, viewState) || undefined,
+            viewState: viewState
         };
         console.debug('[page-state] Saving state:', state);
         localStorage.setItem('pageState', JSON.stringify(state));
@@ -1351,6 +2581,16 @@ function savePageState() {
     catch (error) {
         console.debug('Failed to save page state:', error);
     }
+}
+function getAppIdFromViewState(currentView, viewState) {
+    if (viewState && viewState.currentAppId) {
+        return viewState.currentAppId;
+    }
+    // Fallback for legacy state
+    if (currentView === 'compose' && composeState?.currentAppId) {
+        return composeState.currentAppId;
+    }
+    return null;
 }
 function saveToHistory(state) {
     try {
@@ -1390,7 +2630,7 @@ function saveToHistory(state) {
         console.error('Failed to save to history:', error);
     }
 }
-function restorePageState() {
+async function restorePageState() {
     try {
         console.debug('[page-state] Starting page state restoration');
         // First try to restore from URL parameters
@@ -1408,12 +2648,13 @@ function restorePageState() {
                 console.debug('[page-state] Found tenant:', tenant);
                 if (tenant) {
                     // Use the original function directly to avoid circular calls
+                    // ALWAYS skip view switch during page restoration - ViewRegistry will handle the view
                     if (originalSwitchToTenantContext) {
-                        originalSwitchToTenantContext(urlTenantId, tenant.name);
+                        originalSwitchToTenantContext(urlTenantId, tenant.name, true);
                     }
                     else {
                         // Fallback to global function
-                        window.switchToTenantContext(urlTenantId, tenant.name);
+                        window.switchToTenantContext(urlTenantId, tenant.name, true);
                     }
                     // If this is a tenant-apps view, the switchToTenantContext already set the view
                     if (urlView === 'tenant-apps') {
@@ -1446,7 +2687,45 @@ function restorePageState() {
                         showView('tenants');
                         break;
                     case 'compose':
-                        showView('compose');
+                    case 'template-editor':
+                        // Use ViewRegistry for managed views
+                        const roles = state.user?.roles || [];
+                        await viewRegistry.showView(urlView, roles);
+                        // Restore saved state for these views after activation
+                        if (urlView === 'template-editor' && tenantId) {
+                            // Get the current app ID from the global state
+                            const currentAppId = getCurrentAppId();
+                            if (currentAppId) {
+                                const savedState = localStorage.getItem(`templateEditorState_${currentAppId}`);
+                                if (savedState) {
+                                    try {
+                                        const state = JSON.parse(savedState);
+                                        await viewRegistry.restoreViewState('template-editor', state);
+                                        console.debug('[page-state] Restored template editor state');
+                                    }
+                                    catch (error) {
+                                        console.warn('[page-state] Failed to restore template editor state:', error);
+                                    }
+                                }
+                            }
+                        }
+                        else if (urlView === 'compose' && tenantId) {
+                            // Get the current app ID from the global state
+                            const currentAppId = getCurrentAppId();
+                            if (currentAppId) {
+                                const savedState = localStorage.getItem(`composeState_${currentAppId}`);
+                                if (savedState) {
+                                    try {
+                                        const state = JSON.parse(savedState);
+                                        await viewRegistry.restoreViewState('compose', state);
+                                        console.debug('[page-state] Restored compose state');
+                                    }
+                                    catch (error) {
+                                        console.warn('[page-state] Failed to restore compose state:', error);
+                                    }
+                                }
+                            }
+                        }
                         break;
                     default:
                         console.warn('[page-state] Unknown view type:', urlView);
@@ -1493,7 +2772,13 @@ function restorePageState() {
                 showView('smtp-config');
             }
             else {
-                showView(savedPageState.currentView);
+                // Use ViewRegistry for managed views
+                const roles = state.user?.roles || [];
+                await viewRegistry.showView(savedPageState.currentView, roles);
+                // Restore view-specific state if available
+                if (savedPageState.viewState) {
+                    await viewRegistry.restoreViewState(savedPageState.currentView, savedPageState.viewState);
+                }
             }
         }
     }
@@ -1502,11 +2787,15 @@ function restorePageState() {
     }
 }
 function getCurrentView() {
-    // Check what's currently visible
+    // Use ViewRegistry if available
+    const currentViewName = viewRegistry.getCurrentViewName();
+    if (currentViewName) {
+        return currentViewName;
+    }
+    // Fallback to DOM inspection for views not yet in registry
     const isSmtpConfigVisible = document.getElementById('view-smtp-config')?.style.display !== 'none';
     const isTenantsVisible = document.getElementById('view-tenants')?.style.display !== 'none';
     const isAppsVisible = document.getElementById('view-apps')?.style.display !== 'none';
-    const isComposeVisible = document.getElementById('view-compose')?.style.display !== 'none';
     // If apps view is visible and we're in tenant context, it's the tenant apps view
     if (isAppsVisible && roleContext.isInTenantContext) {
         return 'tenant-apps';
@@ -2666,10 +3955,9 @@ function switchToTenantContext(tenantId, tenantName, skipViewSwitch) {
     // Update the display
     updateContextIndicator();
     updateRoleContext();
-    // Switch to apps view to show this tenant's apps (unless skipped)
-    if (!skipViewSwitch) {
-        showView('apps');
-    }
+    // DO NOT switch views - let ViewRegistry handle all view management
+    // Only switch to apps if explicitly requested AND we're not in a specific view context
+    // This should rarely happen since ViewRegistry manages all views now
     console.log(`Switched to tenant context: ${tenantName} (${tenantId})`);
 }
 // Legacy functions removed - replaced with new card-based UI
@@ -3521,6 +4809,247 @@ async function initComposeInterface() {
         }
     }
     updateRecipientCount();
+}
+// Initialize template editor interface
+async function initTemplateEditorInterface() {
+    console.log('[Template Editor] Initializing template editor interface');
+    // Get returnUrl and appId from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    templateEditorState.returnUrl = urlParams.get('returnUrl') || '';
+    templateEditorState.currentAppId = urlParams.get('appId') || appId;
+    // Load templates for the current app
+    await loadTemplateEditorData();
+    // Setup event listeners
+    setupTemplateEditorEventListeners();
+    // Initialize TinyMCE for template content
+    initTemplateEditorTinyMCE();
+    console.log('[Template Editor] Initialization complete');
+}
+// Template editor state
+const templateEditorState = {
+    currentAppId: '',
+    returnUrl: '',
+    templates: [],
+    currentTemplate: null,
+    isEditMode: false
+};
+// Load templates for template editor
+async function loadTemplateEditorData() {
+    if (!templateEditorState.currentAppId) {
+        console.warn('[Template Editor] No appId available for loading templates');
+        return;
+    }
+    try {
+        const templates = await api(`/templates?appId=${templateEditorState.currentAppId}`);
+        templateEditorState.templates = templates;
+        populateTemplateEditorDropdown(templates);
+        console.log('[Template Editor] Loaded templates:', templates.length);
+    }
+    catch (error) {
+        console.error('[Template Editor] Failed to load templates', error);
+        showStatusMessage($('#templateEditorStatus'), 'Error loading templates: ' + error.message);
+    }
+}
+// Populate template editor dropdown
+function populateTemplateEditorDropdown(templates) {
+    const select = $('#templateEditorSelect');
+    select.innerHTML = '<option value="">-- Create New Template --</option>';
+    templates.forEach(template => {
+        const option = document.createElement('option');
+        option.value = template.id;
+        option.textContent = `${template.title} (v${template.version})`;
+        select.appendChild(option);
+    });
+}
+// Setup template editor event listeners
+function setupTemplateEditorEventListeners() {
+    const templateSelect = $('#templateEditorSelect');
+    const titleInput = $('#templateTitle');
+    const subjectInput = $('#templateSubject');
+    const saveNewBtn = $('#saveNewTemplateBtn');
+    const updateBtn = $('#updateTemplateBtn');
+    const cancelBtn = $('#cancelTemplateEditBtn');
+    // Template selection change
+    templateSelect.addEventListener('change', async () => {
+        const templateId = templateSelect.value;
+        if (templateId) {
+            await loadTemplateForEditing(templateId);
+        }
+        else {
+            clearTemplateEditor();
+        }
+    });
+    // Save as new template
+    saveNewBtn.addEventListener('click', async () => {
+        await saveNewTemplate();
+    });
+    // Update existing template
+    updateBtn.addEventListener('click', async () => {
+        await updateExistingTemplate();
+    });
+    // Cancel editing
+    cancelBtn.addEventListener('click', () => {
+        cancelTemplateEditing();
+    });
+}
+// Load template for editing
+async function loadTemplateForEditing(templateId) {
+    try {
+        const template = await api(`/templates/${templateId}`);
+        templateEditorState.currentTemplate = template;
+        templateEditorState.isEditMode = true;
+        // Populate form fields
+        $('#templateTitle').value = template.title;
+        $('#templateSubject').value = template.subject || '';
+        // Set TinyMCE content with HTML decoding
+        if (window.tinymce && window.tinymce.get('templateContent')) {
+            const decodedContent = decodeHtmlEntities(template.content || '');
+            window.tinymce.get('templateContent').setContent(decodedContent);
+        }
+        // Show/hide buttons
+        $('#saveNewTemplateBtn').style.display = 'inline-block';
+        $('#updateTemplateBtn').style.display = 'inline-block';
+        console.log('[Template Editor] Loaded template for editing:', template.title);
+    }
+    catch (error) {
+        console.error('[Template Editor] Failed to load template:', error);
+        showStatusMessage($('#templateEditorStatus'), 'Error loading template: ' + error.message);
+    }
+}
+// Clear template editor form
+function clearTemplateEditor() {
+    templateEditorState.currentTemplate = null;
+    templateEditorState.isEditMode = false;
+    $('#templateTitle').value = '';
+    $('#templateSubject').value = '';
+    // Clear TinyMCE content
+    if (window.tinymce && window.tinymce.get('templateContent')) {
+        window.tinymce.get('templateContent').setContent('');
+    }
+    // Show/hide buttons
+    $('#saveNewTemplateBtn').style.display = 'inline-block';
+    $('#updateTemplateBtn').style.display = 'none';
+}
+// Save new template
+async function saveNewTemplate() {
+    const title = $('#templateTitle').value.trim();
+    const subject = $('#templateSubject').value.trim();
+    if (!title) {
+        showStatusMessage($('#templateEditorStatus'), 'Template title is required');
+        return;
+    }
+    // Get content from TinyMCE
+    let content = '';
+    if (window.tinymce && window.tinymce.get('templateContent')) {
+        content = window.tinymce.get('templateContent').getContent();
+    }
+    try {
+        const newTemplate = await api('/templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                appId: templateEditorState.currentAppId,
+                title,
+                subject,
+                content,
+                version: 1
+            })
+        });
+        showStatusMessage($('#templateEditorStatus'), 'Template saved successfully!');
+        // Reload template list
+        await loadTemplateEditorData();
+        // Return to calling app if returnUrl provided
+        if (templateEditorState.returnUrl) {
+            setTimeout(() => {
+                returnToCallingApp('saved', newTemplate);
+            }, 1000);
+        }
+    }
+    catch (error) {
+        console.error('[Template Editor] Failed to save template:', error);
+        showStatusMessage($('#templateEditorStatus'), 'Error saving template: ' + error.message);
+    }
+}
+// Update existing template
+async function updateExistingTemplate() {
+    if (!templateEditorState.currentTemplate) {
+        showStatusMessage($('#templateEditorStatus'), 'No template selected for updating');
+        return;
+    }
+    const title = $('#templateTitle').value.trim();
+    const subject = $('#templateSubject').value.trim();
+    if (!title) {
+        showStatusMessage($('#templateEditorStatus'), 'Template title is required');
+        return;
+    }
+    // Get content from TinyMCE
+    let content = '';
+    if (window.tinymce && window.tinymce.get('templateContent')) {
+        content = window.tinymce.get('templateContent').getContent();
+    }
+    try {
+        const updatedTemplate = await api(`/templates/${templateEditorState.currentTemplate.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title,
+                subject,
+                content
+            })
+        });
+        showStatusMessage($('#templateEditorStatus'), 'Template updated successfully!');
+        // Reload template list
+        await loadTemplateEditorData();
+        // Return to calling app if returnUrl provided
+        if (templateEditorState.returnUrl) {
+            setTimeout(() => {
+                returnToCallingApp('updated', updatedTemplate);
+            }, 1000);
+        }
+    }
+    catch (error) {
+        console.error('[Template Editor] Failed to update template:', error);
+        showStatusMessage($('#templateEditorStatus'), 'Error updating template: ' + error.message);
+    }
+}
+// Cancel template editing and return to calling app
+function cancelTemplateEditing() {
+    if (templateEditorState.returnUrl) {
+        returnToCallingApp('cancelled', null);
+    }
+    else {
+        // Clear form if no return URL
+        clearTemplateEditor();
+        showStatusMessage($('#templateEditorStatus'), 'Editing cancelled');
+    }
+}
+// Return to calling app with result
+function returnToCallingApp(action, template) {
+    if (templateEditorState.returnUrl) {
+        const returnUrl = new URL(templateEditorState.returnUrl);
+        returnUrl.searchParams.set('action', action);
+        if (template) {
+            returnUrl.searchParams.set('templateId', template.id);
+            returnUrl.searchParams.set('templateTitle', template.title);
+        }
+        console.log('[Template Editor] Returning to calling app:', returnUrl.toString());
+        window.location.href = returnUrl.toString();
+    }
+}
+// Initialize TinyMCE for template editor
+function initTemplateEditorTinyMCE() {
+    if (window.tinymce) {
+        window.tinymce.init({
+            selector: '#templateContent',
+            height: 400,
+            menubar: false,
+            plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste code help wordcount',
+            toolbar: 'undo redo | formatselect | bold italic underline | \
+                     alignleft aligncenter alignright alignjustify | \
+                     bullist numlist outdent indent | removeformat | help',
+            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, sans-serif; font-size: 14px; }'
+        });
+    }
 }
 // Load templates, previous messages, and SMTP config
 async function loadComposeData() {

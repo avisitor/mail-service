@@ -29,15 +29,28 @@ export async function listTemplates(tenantId: string, appId?: string) {
   const prisma = getPrisma();
   // Template table doesn't have tenantId column, query by appId only
   const where = appId ? { appId } : {};
-  return prisma.template.findMany({ where, orderBy: [{ title: 'asc' }, { version: 'desc' }] });
+  const allTemplates = await prisma.template.findMany({ where, orderBy: [{ title: 'asc' }, { version: 'desc' }] });
+  
+  // Filter out templates with null or empty content in JavaScript
+  const validTemplates = allTemplates.filter(template => 
+    template.content !== null && template.content !== undefined && template.content.trim() !== ''
+  );
+  
+  return validTemplates;
 }
 
 export async function renderTemplate(id: string, context: Record<string, any>) {
   const tpl = await getTemplate(id);
   if (!tpl) return null;
   
+  // Skip templates with null or empty content
+  if (!tpl.content) {
+    console.warn(`Template ${id} has null or empty content, skipping render`);
+    return null;
+  }
+  
   const recipientContext = context as any; // Cast to RecipientContext since it contains the email field
-  const html = tpl.content ? substituteTemplateVariables(tpl.content, recipientContext) : '';
+  const html = substituteTemplateVariables(tpl.content, recipientContext);
   const text = undefined; // bodyText removed
   const subject = tpl.subject ? substituteTemplateVariables(tpl.subject, recipientContext) : '';
   

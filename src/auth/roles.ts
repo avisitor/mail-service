@@ -52,3 +52,19 @@ export function effectiveTenantScope(user: UserContext | null, requestedTenantId
   if (hasRole(user, 'tenant_admin') || hasRole(user, 'editor')) return user.tenantId || null;
   return null;
 }
+
+export function hasEffectiveTenantAdminRole(user: UserContext | null): boolean {
+  if (!user) return false;
+  
+  // Direct tenant admin role
+  if (hasRole(user, 'tenant_admin')) {
+    return true;
+  }
+  
+  // Superadmin role only when they have a tenantId (in tenant context)
+  if (hasRole(user, 'superadmin') && user.tenantId) {
+    return true;
+  }
+  
+  return false;
+}
