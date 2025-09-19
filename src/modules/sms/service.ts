@@ -3,25 +3,93 @@ import { SmsConfigInput, SmsConfigOutput, ResolvedSmsConfig } from './types.js';
 import crypto from 'crypto';
 
 // Simple encryption for sensitive fields (in production, use proper key management)
-const ENCRYPTION_KEY = process.env.SMS_ENCRYPTION_KEY || 'default-key-change-in-production-32b';
+const ENCRYPTION_KEY_STRING = process.env.SMS_ENCRYPTION_KEY || 'default-key-change-in-production-32b';
 const ALGORITHM = 'aes-256-cbc';
+const IV_LENGTH = 16; // For AES, this is always 16
+
+// Ensure key is exactly 32 bytes for AES-256
+function getEncryptionKey(): Buffer {
+  const keyStr = ENCRYPTION_KEY_STRING;
+  if (keyStr.length === 32) {
+    return Buffer.from(keyStr, 'utf8');
+  } else if (keyStr.length > 32) {
+    return Buffer.from(keyStr.slice(0, 32), 'utf8');
+  } else {
+    // Pad with zeros to reach 32 bytes
+    return Buffer.concat([Buffer.from(keyStr, 'utf8'), Buffer.alloc(32 - keyStr.length)]);
+  }
+}
 
 function encrypt(text: string): string {
   if (!text) return text;
   
-  const cipher = crypto.createCipher(ALGORITHM, ENCRYPTION_KEY);
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return encrypted;
+  return iv.toString('hex') + ':' + encrypted;
 }
 
 function decrypt(encryptedText: string): string {
   if (!encryptedText) return encryptedText;
   
-  const decipher = crypto.createDecipher(ALGORITHM, ENCRYPTION_KEY);
-  let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+  // Check if this is new format with IV (contains ':')
+  if (encryptedText.includes(':')) {
+    try {
+      const textParts = encryptedText.split(':');
+      if (textParts.length !== 2) {
+        throw new Error('Invalid format');
+      }
+      const iv = Buffer.from(textParts[0], 'hex');
+      const encrypted = textParts[1];
+      const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (error) {
+      console.warn('[SMS] Failed to decrypt with new method, trying legacy fallback:', error);
+      // Fall through to legacy method
+    }
+  }
+  
+  // Legacy format - try old createDecipher simulation
+  try {
+    // Simulate the old createDecipher behavior with a fixed key
+    const legacyKey = ENCRYPTION_KEY_STRING.slice(0, 32).padEnd(32, '0');
+    
+    // Try ECB mode (no IV) which is closest to createDecipher behavior
+    const decipher = crypto.createDecipheriv('aes-256-ecb', Buffer.from(legacyKey, 'utf8'), null);
+    decipher.setAutoPadding(true);
+    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (ecbError) {
+    // If ECB fails, try CBC with a zero IV (another createDecipher simulation)
+    try {
+      const legacyKey = ENCRYPTION_KEY_STRING.slice(0, 32).padEnd(32, '0');
+      const zeroIv = Buffer.alloc(16);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(legacyKey, 'utf8'), zeroIv);
+      decipher.setAutoPadding(true);
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (cbcError) {
+      console.error('[SMS] Failed to decrypt with both ECB and CBC legacy methods:', { ecbError, cbcError });
+      // If all methods fail, return original text (might be plain text)
+      console.warn('[SMS] Returning original text as decryption failed');
+      return encryptedText;
+    }
+  }
+}
+
+// Migration helper to detect and re-encrypt legacy data
+function needsMigration(encryptedText: string): boolean {
+  return Boolean(encryptedText && !encryptedText.includes(':'));
+}
+
+function migrateEncryption(plainText: string): string {
+  // Re-encrypt using new format
+  return encrypt(plainText);
 }
 
 interface UserContext {
@@ -459,6 +527,30 @@ export async function getSmsConfigById(
     }
   }
 
+  // Decrypt sensitive data and check for migration needs
+  const decryptedToken = config.token ? decrypt(config.token) : undefined;
+  
+  // Check if migration is needed and perform it
+  let migrationPerformed = false;
+  if (config.token && needsMigration(config.token)) {
+    try {
+      console.log(`[SMS] Migrating encryption for SMS config ${id}`);
+      const newEncryptedToken = migrateEncryption(decryptedToken!);
+      
+      // Update the database with new encrypted format
+      await prisma.smsConfig.update({
+        where: { id },
+        data: { token: newEncryptedToken }
+      });
+      
+      migrationPerformed = true;
+      console.log(`[SMS] Successfully migrated encryption for SMS config ${id}`);
+    } catch (migrationError) {
+      console.error(`[SMS] Failed to migrate encryption for SMS config ${id}:`, migrationError);
+      // Continue without failing - the old data still works
+    }
+  }
+
   return {
     id: config.id,
     scope: config.scope,
@@ -467,7 +559,7 @@ export async function getSmsConfigById(
     tenantName: config.tenant?.name,
     appName: config.app?.name,
     sid: config.sid,
-    token: config.token ? decrypt(config.token) : undefined, // Return decrypted for editing
+    token: decryptedToken, // Return decrypted for editing
     fromNumber: config.fromNumber,
     fallbackTo: config.fallbackTo || undefined,
     serviceSid: config.serviceSid || undefined,

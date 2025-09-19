@@ -484,6 +484,85 @@ export async function registerSmsRoutes(app: FastifyInstance) {
     }
   });
 
+  // Test SMS configuration
+  app.post('/sms-configs/:id/test', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+      const { phoneNumber } = req.body as { phoneNumber: string };
+
+      if (!phoneNumber) {
+        return reply.badRequest('phoneNumber is required');
+      }
+
+      // Get the SMS config
+      const config = await getSmsConfigById(id, userContext);
+      if (!config) {
+        return reply.notFound('SMS configuration not found');
+      }
+
+      // Send test SMS using the provider
+      const testMessage = 'Test SMS from Mail Service configuration';
+      
+      // For testing, we need to use Twilio client directly with the specific config
+      // @ts-ignore
+      const { Twilio } = await import('twilio');
+      const client = new Twilio(config.sid, config.token);
+      
+      const messageParams: any = {
+        body: testMessage,
+        to: phoneNumber,
+        from: config.fromNumber
+      };
+      
+      if (config.serviceSid) {
+        messageParams.messagingServiceSid = config.serviceSid;
+        delete messageParams.from; // Can't use both from and messagingServiceSid
+      }
+      
+      const result = await client.messages.create(messageParams);
+
+      return { 
+        success: true, 
+        message: 'Test SMS sent successfully',
+        messageId: result.sid,
+        to: phoneNumber
+      };
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to test SMS config');
+      return reply.internalServerError(`Test SMS failed: ${error.message}`);
+    }
+  });
+
+  // Activate SMS configuration (set as active, deactivate others in same scope)
+  app.post('/sms-configs/:id/activate', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+
+      // Get the config to check its scope
+      const config = await getSmsConfigById(id, userContext);
+      if (!config) {
+        return reply.notFound('SMS configuration not found');
+      }
+
+      // Use updateSmsConfig to activate this config and deactivate others
+      await updateSmsConfig(id, { isActive: true }, userContext);
+
+      return { 
+        success: true, 
+        message: 'SMS configuration activated successfully'
+      };
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to activate SMS config');
+      return reply.internalServerError(`Activation failed: ${error.message}`);
+    }
+  });
+
   // Get effective SMS configuration for a tenant/app
   app.get('/sms-configs/effective/:tenantId', {
     preHandler: (req, reply) => app.authenticate(req, reply),

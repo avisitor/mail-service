@@ -3718,11 +3718,11 @@ interface SmsConfig {
   scope: 'GLOBAL' | 'TENANT' | 'APP';
   tenantId?: string;
   appId?: string;
-  accountSid: string;
-  authToken: string;
+  sid: string;
+  token: string;
   fromNumber: string;
-  fallbackToNumber?: string;
-  messagingServiceSid?: string;
+  fallbackTo?: string;
+  serviceSid?: string;
   isActive?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -5893,11 +5893,11 @@ function populateSmsForm(config: SmsConfig) {
       }
     };
     
-    setSmsField('Sid', config.accountSid);
-    setSmsField('Token', config.authToken);
+    setSmsField('Sid', config.sid);
+    setSmsField('Token', config.token);
     setSmsField('FromNumber', config.fromNumber);
-    setSmsField('FallbackTo', config.fallbackToNumber);
-    setSmsField('ServiceSid', config.messagingServiceSid);
+    setSmsField('FallbackTo', config.fallbackTo);
+    setSmsField('ServiceSid', config.serviceSid);
     setSmsField('IsActive', config.isActive);
     
     // Show delete button for existing configs
@@ -5938,8 +5938,88 @@ function clearSmsForm() {
 }
 
 async function displayGlobalSmsConfigs() {
-  // Implementation similar to displayGlobalConfigs but for SMS
-  console.log('displayGlobalSmsConfigs called');
+  const cardsContainer = document.getElementById('globalSmsConfigCards');
+  const noConfigsMessage = document.getElementById('noGlobalSmsConfigs');
+  
+  if (!cardsContainer || !noConfigsMessage) return;
+  
+  const globalConfigs = state.smsConfigs.filter(c => c.scope === 'GLOBAL');
+  
+  if (globalConfigs.length === 0) {
+    cardsContainer.style.display = 'none';
+    noConfigsMessage.style.display = 'block';
+    return;
+  }
+  
+  cardsContainer.style.display = 'flex';
+  noConfigsMessage.style.display = 'none';
+  
+  // Create header with radio selection info
+  const hasActiveConfig = globalConfigs.some(c => c.isActive);
+  let cardsHtml = '';
+  
+  if (globalConfigs.length > 1) {
+    cardsHtml += `
+      <div class="global-config-header">
+        <h3>Global SMS Configurations</h3>
+        <p>Select which configuration should be active for global SMS sending:</p>
+      </div>
+    `;
+  }
+  
+  cardsHtml += globalConfigs.map(config => createGlobalSmsConfigCard(config)).join('');
+  cardsContainer.innerHTML = cardsHtml;
+}
+
+function createGlobalSmsConfigCard(config: SmsConfig): string {
+  const isActive = config.isActive;
+  const configName = config.fromNumber || `SMS Config ${config.id.slice(-4)}`;
+  const serviceName = 'twilio';
+  const fromNumber = config.fromNumber || 'Not set';
+  const accountSid = config.sid || 'Not set';
+  
+  return `
+    <div class="global-config-card ${isActive ? 'active' : ''}" data-config-id="${config.id}">
+      <div class="global-config-card-header">
+        <div class="global-config-card-selector">
+          <input type="radio" 
+                 name="activeGlobalSmsConfig" 
+                 id="sms-radio-${config.id}" 
+                 value="${config.id}" 
+                 ${isActive ? 'checked' : ''} 
+                 onchange="activateGlobalSmsConfig('${config.id}')" />
+          <label for="sms-radio-${config.id}" class="radio-label">
+            <h3 class="global-config-card-title">${configName}</h3>
+          </label>
+        </div>
+        <div class="global-config-card-status">
+          <span class="service-icon ${serviceName}">${serviceName.toUpperCase()}</span>
+          ${isActive ? '<span class="active-badge">ACTIVE</span>' : ''}
+        </div>
+      </div>
+      
+      <div class="global-config-card-details">
+        <div class="global-config-card-detail">
+          <span>Account SID:</span>
+          <span>${accountSid.length > 10 ? accountSid.substring(0, 10) + '...' : accountSid}</span>
+        </div>
+        <div class="global-config-card-detail">
+          <span>From Number:</span>
+          <span>${fromNumber}</span>
+        </div>
+        <div class="global-config-card-detail">
+          <span>Service SID:</span>
+          <span>${config.serviceSid || 'None'}</span>
+        </div>
+      </div>
+      
+      <div class="global-config-card-actions">
+        <button class="global-config-card-btn primary" onclick="editSmsConfig('${config.id}')">Edit</button>
+        <button class="global-config-card-btn" onclick="testGlobalSmsConfigById('${config.id}')">Test</button>
+        <button class="global-config-card-btn danger" onclick="deleteSmsConfig('${config.id}')">Delete</button>
+      </div>
+    </div>
+  `;
 }
 
 async function displayTenantSmsOverview() {
@@ -5950,6 +6030,31 @@ async function displayTenantSmsOverview() {
 async function displayTenantSmsAdminView() {
   // Implementation similar to displayTenantAdminView but for SMS
   console.log('displayTenantSmsAdminView called');
+}
+
+async function activateGlobalSmsConfig(configId: string) {
+  try {
+    await api(`/sms-configs/${configId}/activate`, { method: 'POST' });
+    showStatusMessage(document.getElementById('smsConfigStatus') as HTMLElement, 'SMS configuration activated');
+    await loadAndDisplaySmsConfigs();
+  } catch (error: any) {
+    showStatusMessage(document.getElementById('smsConfigStatus') as HTMLElement, 'Error activating SMS config: ' + error.message);
+  }
+}
+
+async function testGlobalSmsConfigById(configId: string) {
+  const testNumber = prompt('Enter a phone number to send a test SMS (include country code, e.g., +1234567890):');
+  if (!testNumber) return;
+  
+  try {
+    await api(`/sms-configs/${configId}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber: testNumber })
+    });
+    showStatusMessage(document.getElementById('smsConfigStatus') as HTMLElement, 'Test SMS sent successfully');
+  } catch (error: any) {
+    showStatusMessage(document.getElementById('smsConfigStatus') as HTMLElement, 'Error sending test SMS: ' + error.message);
+  }
 }
 
 // Make functions available globally for onclick handlers
@@ -5966,6 +6071,8 @@ async function displayTenantSmsAdminView() {
 (window as any).clearSmsForm = clearSmsForm;
 (window as any).openSmsConfigModal = openSmsConfigModal;
 (window as any).openAppSmsConfigModal = openAppSmsConfigModal;
+(window as any).activateGlobalSmsConfig = activateGlobalSmsConfig;
+(window as any).testGlobalSmsConfigById = testGlobalSmsConfigById;
 
 // ===============================================
 // COMPOSE INTERFACE FUNCTIONALITY
