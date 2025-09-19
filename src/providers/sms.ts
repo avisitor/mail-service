@@ -2,6 +2,7 @@
 // @ts-ignore
 import { Twilio } from 'twilio';
 import { PrismaClient, SmsConfigScope } from '@prisma/client';
+import { resolveSmsConfig } from '../modules/sms/service.js';
 
 const prisma = new PrismaClient();
 
@@ -30,38 +31,19 @@ interface SmsResult {
 // Function to get SMS configuration from database
 async function getSmsConfig(tenantId?: string, appId?: string): Promise<SmsConfig | null> {
   try {
-    // Try to find config in order: APP -> TENANT -> GLOBAL
-    let smsConfig = null;
+    const config = await resolveSmsConfig(appId);
     
-    if (appId) {
-      smsConfig = await prisma.smsConfig.findFirst({
-        where: { scope: SmsConfigScope.APP, appId, isActive: true }
-      });
-    }
-    
-    if (!smsConfig && tenantId) {
-      smsConfig = await prisma.smsConfig.findFirst({
-        where: { scope: SmsConfigScope.TENANT, tenantId, isActive: true }
-      });
-    }
-    
-    if (!smsConfig) {
-      smsConfig = await prisma.smsConfig.findFirst({
-        where: { scope: SmsConfigScope.GLOBAL, isActive: true }
-      });
-    }
-    
-    if (!smsConfig) {
+    if (!config) {
       console.error('[SMS] No active SMS configuration found');
       return null;
     }
     
     return {
-      accountSid: smsConfig.sid,
-      authToken: smsConfig.token,
-      fromNumber: smsConfig.fromNumber,
-      fallbackTo: smsConfig.fallbackTo || undefined,
-      serviceSid: smsConfig.serviceSid || undefined
+      accountSid: config.accountSid,
+      authToken: config.authToken,
+      fromNumber: config.fromNumber,
+      fallbackTo: config.fallbackToNumber || undefined,
+      serviceSid: config.messagingServiceSid || undefined
     };
   } catch (error) {
     console.error('[SMS] Error getting SMS config:', error);

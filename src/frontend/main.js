@@ -1535,6 +1535,39 @@ class SmtpConfigView {
         return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
     }
 }
+class SmsConfigView {
+    name = 'sms-config';
+    elementId = 'view-sms-config';
+    constructor() {
+        registerView(this);
+    }
+    async initialize() {
+        console.log('[SmsConfigView] Initializing SMS config view');
+    }
+    async activate() {
+        console.log('[SmsConfigView] Activating SMS config view');
+        // Update title
+        const titleElement = document.getElementById('viewTitle');
+        if (titleElement) {
+            titleElement.textContent = 'SMS Configuration';
+        }
+        // Load and display configs
+        console.log('SMS Config view shown, loading configurations...');
+        loadAndDisplaySmsConfigs();
+    }
+    deactivate() {
+        console.log('[SmsConfigView] Deactivating SMS config view');
+    }
+    saveState() {
+        return {}; // SMS config view doesn't need state persistence
+    }
+    async restoreState(state) {
+        // No state to restore for SMS config view
+    }
+    canAccess(userRoles) {
+        return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
+    }
+}
 // Check if we're returning from IDP (has token parameter)
 const url = new URL(window.location.href);
 const hasTokenFromIdp = !!url.searchParams.get('token');
@@ -1554,6 +1587,7 @@ const state = {
     tenants: [],
     apps: [],
     smtpConfigs: [],
+    smsConfigs: [],
     dbMode: true,
     user: null,
 };
@@ -2633,6 +2667,7 @@ async function initializeViews() {
     const appsView = new AppsView();
     const tenantsView = new TenantsView();
     const smtpConfigView = new SmtpConfigView();
+    const smsConfigView = new SmsConfigView();
     // Initialize all views
     await composeView.initialize();
     await smsComposeView.initialize();
@@ -2640,6 +2675,7 @@ async function initializeViews() {
     await appsView.initialize();
     await tenantsView.initialize();
     await smtpConfigView.initialize();
+    await smsConfigView.initialize();
     console.log('[ViewRegistry] Views initialized and registered');
 }
 function wireNav() {
@@ -2978,6 +3014,7 @@ async function init() {
     // wireNav() is already called in onAuthenticated() - no need to call again
     wireAppManagement();
     setupSmtpConfig();
+    setupSmsConfig();
     // Set up browser history handling
     setupHistoryHandling();
     // Restore page state after everything is loaded and set up
@@ -4901,6 +4938,414 @@ function showStatus(element, message, type) {
         element.style.display = 'none';
     }, 5000);
 }
+// ===============================================
+// SMS SETUP AND MODAL MANAGEMENT
+// ===============================================
+function setupSmsConfig() {
+    console.log('Setting up SMS configuration UI');
+    // Set up SMS modals
+    setupSmsConfigModal();
+    setupAppSmsConfigModal();
+    // Initial load if we're in SMS config view
+    const currentView = getCurrentView();
+    if (currentView === 'sms-config') {
+        loadAndDisplaySmsConfigs();
+    }
+}
+function setupSmsConfigModal() {
+    console.log('Setting up SMS config modal...');
+    // Close modal buttons
+    const closeBtn = document.getElementById('closeSmsModalBtn');
+    const cancelBtn = document.getElementById('cancelSmsModalBtn');
+    closeBtn?.addEventListener('click', closeSmsConfigModal);
+    cancelBtn?.addEventListener('click', closeSmsConfigModal);
+    // Delete button
+    const deleteBtn = document.getElementById('deleteSmsModalBtn');
+    deleteBtn?.addEventListener('click', async () => {
+        if (currentSmsConfig?.id) {
+            await deleteSmsConfig(currentSmsConfig.id);
+            closeSmsConfigModal();
+        }
+    });
+    // SMS config form submission
+    const smsForm = document.getElementById('smsGlobalConfigForm');
+    smsForm?.addEventListener('submit', handleSmsConfigSubmit);
+    // Click outside to close
+    const modal = document.getElementById('smsConfigModal');
+    modal?.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeSmsConfigModal();
+        }
+    });
+}
+function setupAppSmsConfigModal() {
+    console.log('Setting up app SMS config modal...');
+    // Close modal buttons
+    const closeBtn = document.getElementById('closeAppSmsModalBtn');
+    const cancelBtn = document.getElementById('cancelAppSmsModalBtn');
+    closeBtn?.addEventListener('click', closeAppSmsConfigModal);
+    cancelBtn?.addEventListener('click', closeAppSmsConfigModal);
+    // Delete button
+    const deleteBtn = document.getElementById('deleteAppSmsModalBtn');
+    deleteBtn?.addEventListener('click', async () => {
+        if (currentSmsConfig?.id) {
+            await deleteSmsConfig(currentSmsConfig.id);
+            closeAppSmsConfigModal();
+        }
+    });
+    // App SMS config form submission
+    const appSmsForm = document.getElementById('appSmsConfigForm');
+    appSmsForm?.addEventListener('submit', handleAppSmsConfigSubmit);
+    // Click outside to close
+    const modal = document.getElementById('appSmsConfigModal');
+    modal?.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeAppSmsConfigModal();
+        }
+    });
+}
+function closeSmsConfigModal() {
+    const modal = document.getElementById('smsConfigModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    clearSmsForm();
+}
+function closeAppSmsConfigModal() {
+    const modal = document.getElementById('appSmsConfigModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    clearSmsForm();
+}
+function openSmsConfigModal(configId) {
+    console.log('openSmsConfigModal called with configId:', configId);
+    const modal = document.getElementById('smsConfigModal');
+    if (!modal) {
+        console.error('SMS config modal not found');
+        return;
+    }
+    // Clear previous state
+    clearSmsForm();
+    if (configId) {
+        // Editing existing config
+        editSmsConfig(configId);
+    }
+    else {
+        // Creating new config
+        modal.style.display = 'flex';
+        const titleEl = document.getElementById('smsModalTitle');
+        if (titleEl) {
+            titleEl.textContent = 'New SMS Configuration';
+        }
+    }
+}
+function openAppSmsConfigModal(tenantId, appId, configId) {
+    console.log('openAppSmsConfigModal called', { tenantId, appId, configId });
+    const modal = document.getElementById('appSmsConfigModal');
+    if (!modal) {
+        console.error('App SMS config modal not found');
+        return;
+    }
+    // Clear previous state
+    clearSmsForm();
+    // Set tenant and app context
+    const tenantIdInput = document.getElementById('appSmsConfigTenantId');
+    const appIdInput = document.getElementById('appSmsConfigAppId');
+    if (tenantIdInput)
+        tenantIdInput.value = tenantId;
+    if (appIdInput)
+        appIdInput.value = appId;
+    if (configId) {
+        // Editing existing config
+        editSmsConfig(configId);
+    }
+    else {
+        // Creating new config
+        modal.style.display = 'flex';
+        const titleEl = document.getElementById('appSmsModalTitle');
+        if (titleEl) {
+            titleEl.textContent = 'New App SMS Configuration';
+        }
+    }
+}
+async function handleSmsConfigSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData(form);
+    try {
+        const smsConfig = {
+            scope: 'GLOBAL',
+            accountSid: document.getElementById('modalSmsSid')?.value,
+            authToken: document.getElementById('modalSmsToken')?.value,
+            fromNumber: document.getElementById('modalSmsFromNumber')?.value,
+            fallbackToNumber: document.getElementById('modalSmsFallbackTo')?.value || undefined,
+            messagingServiceSid: document.getElementById('modalSmsServiceSid')?.value || undefined,
+            isActive: document.getElementById('modalSmsIsActive')?.checked || false,
+        };
+        const editConfigId = document.getElementById('smsEditConfigId')?.value;
+        let result;
+        if (editConfigId) {
+            // Update existing config
+            result = await api(`/sms-configs/${editConfigId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(smsConfig),
+            });
+        }
+        else {
+            // Create new config
+            result = await api('/sms-configs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(smsConfig),
+            });
+        }
+        console.log('SMS config saved:', result);
+        closeSmsConfigModal();
+        await loadAndDisplaySmsConfigs();
+    }
+    catch (error) {
+        console.error('Failed to save SMS config:', error);
+        alert(`Failed to save SMS configuration: ${error.message}`);
+    }
+}
+async function handleAppSmsConfigSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    try {
+        const tenantId = document.getElementById('appSmsConfigTenantId')?.value;
+        const appId = document.getElementById('appSmsConfigAppId')?.value;
+        const smsConfig = {
+            scope: 'APP',
+            tenantId,
+            appId,
+            accountSid: document.getElementById('appModalSmsSid')?.value,
+            authToken: document.getElementById('appModalSmsToken')?.value,
+            fromNumber: document.getElementById('appModalSmsFromNumber')?.value,
+            fallbackToNumber: document.getElementById('appModalSmsFallbackTo')?.value || undefined,
+            messagingServiceSid: document.getElementById('appModalSmsServiceSid')?.value || undefined,
+            isActive: document.getElementById('appModalSmsIsActive')?.checked || false,
+        };
+        const editConfigId = document.getElementById('appSmsEditConfigId')?.value;
+        let result;
+        if (editConfigId) {
+            // Update existing config
+            result = await api(`/sms-configs/${editConfigId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(smsConfig),
+            });
+        }
+        else {
+            // Create new config
+            result = await api('/sms-configs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(smsConfig),
+            });
+        }
+        console.log('App SMS config saved:', result);
+        closeAppSmsConfigModal();
+        await loadAndDisplaySmsConfigs();
+    }
+    catch (error) {
+        console.error('Failed to save app SMS config:', error);
+        alert(`Failed to save SMS configuration: ${error.message}`);
+    }
+}
+// ===============================================
+// SMS CONFIGURATION FUNCTIONALITY
+// ===============================================
+let currentSmsConfig = null;
+async function loadAndDisplaySmsConfigs() {
+    try {
+        // Load all necessary data
+        await loadSmsConfigs();
+        // Check user role to determine what to display
+        const roles = state.user?.roles || [];
+        const isSuperadmin = roles.includes('superadmin');
+        const isTenantAdmin = roles.includes('tenant_admin');
+        if (isSuperadmin) {
+            // Superadmin: full tenant management view
+            await loadTenants();
+            await loadAllApps(); // Load ALL apps for proper tree display
+            await displayGlobalSmsConfigs();
+            await displayTenantSmsOverview();
+        }
+        else if (isTenantAdmin) {
+            // Tenant admin: use the EXACT same view as superadmin impersonating their tenant
+            const tenantId = state.user?.tenantId;
+            const tenantName = state.user?.tenantName || tenantId || 'Your Tenant';
+            if (tenantId) {
+                // Load apps first (backend will filter to tenant's apps)
+                await loadAllApps();
+                // Use the same switchToTenantContext that superadmin uses when impersonating
+                // This gives us the exact same polished UI
+                // Check if we're currently in compose view to avoid overriding it
+                const currentView = getCurrentView();
+                const skipViewSwitch = currentView === 'compose';
+                if (window.switchToSmsConfigTenantContext) {
+                    window.switchToSmsConfigTenantContext(tenantId, tenantName, skipViewSwitch);
+                }
+                else {
+                    console.warn('switchToSmsConfigTenantContext not available, falling back to basic view');
+                    await displayTenantSmsAdminView();
+                }
+            }
+            else {
+                console.error('Tenant admin has no tenantId context');
+                await displayTenantSmsAdminView();
+            }
+        }
+        else {
+            // Regular user: basic view
+            await loadAllApps();
+            await displayGlobalSmsConfigs();
+            await displayTenantSmsAdminView();
+        }
+        // Update context indicator
+        updateContextIndicator();
+    }
+    catch (error) {
+        console.error('Failed to load and display SMS configs:', error);
+    }
+}
+async function loadSmsConfigs() {
+    try {
+        const configs = await api('/sms-configs');
+        state.smsConfigs = configs; // Store in state for tree building
+        displaySmsConfigList(configs);
+    }
+    catch (error) {
+        console.error('Failed to load SMS configs:', error);
+        state.smsConfigs = []; // Clear on error
+    }
+}
+function displaySmsConfigList(configs) {
+    // No longer needed - using tree-based UI instead
+    console.log('displaySmsConfigList called with', configs.length, 'configs (tree UI is used instead)');
+}
+async function editSmsConfig(configId) {
+    console.log('Edit button clicked for SMS config:', configId);
+    try {
+        const config = await api(`/sms-configs/${configId}`);
+        console.log('Loaded SMS config for editing:', config);
+        currentSmsConfig = config;
+        populateSmsForm(config);
+    }
+    catch (error) {
+        console.error('Failed to load SMS config:', error);
+    }
+}
+async function deleteSmsConfig(configId) {
+    if (!confirm('Are you sure you want to delete this SMS configuration?'))
+        return;
+    try {
+        await api(`/sms-configs/${configId}`, { method: 'DELETE' });
+        await loadSmsConfigs();
+        if (currentSmsConfig?.id === configId) {
+            clearSmsForm();
+        }
+    }
+    catch (error) {
+        console.error('Failed to delete SMS config:', error);
+    }
+}
+function populateSmsForm(config) {
+    // Determine if this is a global/tenant config or app config
+    const isAppConfig = config.scope === 'APP';
+    const modalId = isAppConfig ? 'appSmsConfigModal' : 'smsConfigModal';
+    const formId = isAppConfig ? 'appSmsConfigForm' : 'smsGlobalConfigForm';
+    const prefix = isAppConfig ? 'appModal' : 'modal';
+    // Show the appropriate modal
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    // Set form values
+    const form = document.getElementById(formId);
+    if (form) {
+        // Set hidden ID for editing
+        const editIdInput = document.getElementById(isAppConfig ? 'appSmsEditConfigId' : 'smsEditConfigId');
+        if (editIdInput) {
+            editIdInput.value = config.id;
+        }
+        // If app config, set tenant and app IDs
+        if (isAppConfig) {
+            const tenantIdInput = document.getElementById('appSmsConfigTenantId');
+            const appIdInput = document.getElementById('appSmsConfigAppId');
+            if (tenantIdInput)
+                tenantIdInput.value = config.tenantId || '';
+            if (appIdInput)
+                appIdInput.value = config.appId || '';
+        }
+        // Set SMS fields
+        const setSmsField = (fieldName, value) => {
+            const element = document.getElementById(`${prefix}Sms${fieldName}`);
+            if (element) {
+                if (element.type === 'checkbox') {
+                    element.checked = !!value;
+                }
+                else {
+                    element.value = value?.toString() || '';
+                }
+            }
+        };
+        setSmsField('Sid', config.accountSid);
+        setSmsField('Token', config.authToken);
+        setSmsField('FromNumber', config.fromNumber);
+        setSmsField('FallbackTo', config.fallbackToNumber);
+        setSmsField('ServiceSid', config.messagingServiceSid);
+        setSmsField('IsActive', config.isActive);
+        // Show delete button for existing configs
+        const deleteBtn = document.getElementById(isAppConfig ? 'deleteAppSmsModalBtn' : 'deleteSmsModalBtn');
+        if (deleteBtn) {
+            deleteBtn.style.display = 'block';
+        }
+        // Update modal title
+        const titleElement = document.getElementById(isAppConfig ? 'appSmsModalTitle' : 'smsModalTitle');
+        if (titleElement) {
+            titleElement.textContent = `Edit ${isAppConfig ? 'App ' : ''}SMS Configuration`;
+        }
+    }
+}
+function clearSmsForm() {
+    // Clear both global and app forms
+    const globalForm = document.getElementById('smsGlobalConfigForm');
+    const appForm = document.getElementById('appSmsConfigForm');
+    if (globalForm)
+        globalForm.reset();
+    if (appForm)
+        appForm.reset();
+    // Hide delete buttons
+    const deleteBtn = document.getElementById('deleteSmsModalBtn');
+    const deleteAppBtn = document.getElementById('deleteAppSmsModalBtn');
+    if (deleteBtn)
+        deleteBtn.style.display = 'none';
+    if (deleteAppBtn)
+        deleteAppBtn.style.display = 'none';
+    // Reset titles
+    const titleElement = document.getElementById('smsModalTitle');
+    const appTitleElement = document.getElementById('appSmsModalTitle');
+    if (titleElement)
+        titleElement.textContent = 'SMS Configuration';
+    if (appTitleElement)
+        appTitleElement.textContent = 'App SMS Configuration';
+    currentSmsConfig = null;
+}
+async function displayGlobalSmsConfigs() {
+    // Implementation similar to displayGlobalConfigs but for SMS
+    console.log('displayGlobalSmsConfigs called');
+}
+async function displayTenantSmsOverview() {
+    // Implementation similar to displayTenantOverview but for SMS
+    console.log('displayTenantSmsOverview called');
+}
+async function displayTenantSmsAdminView() {
+    // Implementation similar to displayTenantAdminView but for SMS
+    console.log('displayTenantSmsAdminView called');
+}
 // Make functions available globally for onclick handlers
 window.activateGlobalConfig = activateGlobalConfig;
 window.editGlobalConfig = editGlobalConfig;
@@ -4908,6 +5353,12 @@ window.testGlobalConfigById = testGlobalConfigById;
 window.deleteGlobalConfigById = deleteGlobalConfigById;
 window.switchToTenantContext = switchToTenantContext;
 window.clearDraft = clearDraft;
+// SMS functions
+window.editSmsConfig = editSmsConfig;
+window.deleteSmsConfig = deleteSmsConfig;
+window.clearSmsForm = clearSmsForm;
+window.openSmsConfigModal = openSmsConfigModal;
+window.openAppSmsConfigModal = openAppSmsConfigModal;
 // Centralized element management for compose interface
 class ComposeElements {
     static ELEMENT_IDS = {

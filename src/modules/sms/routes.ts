@@ -2,6 +2,16 @@ import { FastifyInstance } from 'fastify';
 import { sendSms, sendSingleSms, getMessageStatus } from '../../providers/sms.js';
 import { validateAppAccess } from '../../utils/app-validation.js';
 import { checkAuthentication, createIdpRedirectUrl } from '../../auth/idp-redirect.js';
+import { AuthService } from '../../auth/service.js';
+import {
+  listSmsConfigs,
+  getSmsConfigById,
+  createSmsConfig,
+  updateSmsConfig,
+  deleteSmsConfig,
+  resolveSmsConfig
+} from './service.js';
+import { SmsConfigInput } from './types.js';
 
 // Helper function to validate appId exists in database
 async function validateAppId(appId: string): Promise<{ isValid: boolean; app: any | null; error?: string }> {
@@ -331,6 +341,214 @@ export async function registerSmsRoutes(app: FastifyInstance) {
         error: 'Internal Server Error', 
         message: 'Failed to get message status: ' + (error as Error).message 
       });
+    }
+  });
+
+  // SMS Configuration Management Routes
+
+  // List SMS configurations (with access control)
+  app.get('/sms-configs', async (req, reply) => {
+    try {
+      const userContext = await AuthService.requireAuth(req, reply);
+      if (userContext === null) return; // Auth failed, response already sent
+      
+      const configs = await listSmsConfigs(userContext);
+      return reply.send(configs);
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to list SMS configs');
+      if (!reply.sent) {
+        return reply.internalServerError(error.message);
+      }
+    }
+  });
+
+  // Get specific SMS configuration
+  app.get('/sms-configs/:id', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+      const config = await getSmsConfigById(id, userContext);
+      
+      if (!config) {
+        return reply.notFound('SMS configuration not found');
+      }
+
+      return config;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to get SMS config');
+      return reply.internalServerError(error.message);
+    }
+  });
+
+  // Create SMS configuration
+  app.post('/sms-configs', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['scope', 'sid', 'token', 'fromNumber'],
+        properties: {
+          scope: { type: 'string', enum: ['GLOBAL', 'TENANT', 'APP'] },
+          tenantId: { type: 'string' },
+          appId: { type: 'string' },
+          sid: { type: 'string' },
+          token: { type: 'string' },
+          fromNumber: { type: 'string' },
+          fallbackTo: { type: 'string' },
+          serviceSid: { type: 'string' },
+          isActive: { type: 'boolean' },
+        },
+        // Conditional validation for different scopes
+        allOf: [
+          {
+            if: { properties: { scope: { const: 'TENANT' } } },
+            then: { required: ['tenantId'] }
+          },
+          {
+            if: { properties: { scope: { const: 'APP' } } },
+            then: { required: ['appId'] }
+          }
+        ]
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const input = req.body as any;
+      const config = await createSmsConfig(input, userContext);
+      
+      return reply.status(201).send(config);
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to create SMS config');
+      if (error.message.includes('access') || error.message.includes('permission') || error.message.includes('different tenant')) {
+        return reply.forbidden(error.message);
+      }
+      if (error.message.includes('already exists')) {
+        return reply.conflict(error.message);
+      }
+      return reply.badRequest(error.message);
+    }
+  });
+
+  // Update SMS configuration
+  app.put('/sms-configs/:id', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          sid: { type: 'string' },
+          token: { type: 'string' },
+          fromNumber: { type: 'string' },
+          fallbackTo: { type: 'string' },
+          serviceSid: { type: 'string' },
+          isActive: { type: 'boolean' },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+      const input = req.body as any;
+      
+      const config = await updateSmsConfig(id, input, userContext);
+      return config;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to update SMS config');
+      if (error.message.includes('not found') || error.message.includes('access denied')) {
+        return reply.notFound(error.message);
+      }
+      return reply.badRequest(error.message);
+    }
+  });
+
+  // Delete SMS configuration
+  app.delete('/sms-configs/:id', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { id } = req.params as { id: string };
+      await deleteSmsConfig(id, userContext);
+      
+      return reply.status(204).send();
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to delete SMS config');
+      if (error.message.includes('not found') || error.message.includes('access denied')) {
+        return reply.notFound(error.message);
+      }
+      return reply.internalServerError(error.message);
+    }
+  });
+
+  // Get effective SMS configuration for a tenant/app
+  app.get('/sms-configs/effective/:tenantId', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { tenantId } = req.params as { tenantId: string };
+      const { appId } = req.query as { appId?: string };
+
+      // Access control: only superadmins or tenant members can view effective config (when auth enabled)
+      if (userContext) {
+        const isSuperAdmin = userContext.roles.includes('superadmin');
+        if (!isSuperAdmin && userContext.tenantId !== tenantId) {
+          return reply.forbidden('Cannot view SMS configuration for different tenant');
+        }
+      }
+
+      const config = await resolveSmsConfig(tenantId, appId);
+      return config;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to get effective SMS config');
+      return reply.internalServerError(error.message);
+    }
+  });
+
+  // Get effective SMS configuration by scope (for UI)
+  app.get('/sms-configs/effective', {
+    preHandler: (req, reply) => app.authenticate(req, reply),
+  }, async (req, reply) => {
+    try {
+      const userContext = (req as any).userContext;
+      const { scope, tenantId, appId } = req.query as { 
+        scope: 'GLOBAL' | 'TENANT' | 'APP'; 
+        tenantId?: string; 
+        appId?: string; 
+      };
+
+      if (!scope) {
+        return reply.badRequest('scope query parameter is required');
+      }
+
+      // For GLOBAL scope, we don't need tenant/app context
+      if (scope === 'GLOBAL') {
+        const config = await resolveSmsConfig(undefined, undefined);
+        return config;
+      }
+
+      // For TENANT/APP scope, we need tenantId
+      if (!tenantId) {
+        return reply.badRequest('tenantId query parameter is required for TENANT/APP scope');
+      }
+
+      // Access control: only superadmins or tenant members can view effective config (when auth enabled)
+      if (userContext) {
+        const isSuperAdmin = userContext.roles.includes('superadmin');
+        if (!isSuperAdmin && userContext.tenantId !== tenantId) {
+          return reply.forbidden('Cannot view SMS configuration for different tenant');
+        }
+      }
+
+      const config = await resolveSmsConfig(tenantId, scope === 'APP' ? appId : undefined);
+      return config;
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to get effective SMS config by scope');
+      return reply.internalServerError(error.message);
     }
   });
 }

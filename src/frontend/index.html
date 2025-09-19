@@ -17,7 +17,8 @@
         <button data-view="compose" class="navBtn">Compose</button>
         <button data-view="sms-compose" class="navBtn">Send SMS</button>
         <button data-view="template-editor" class="navBtn" id="templateEditorNavBtn" style="display:none">Templates</button>
-        <button data-view="smtp-config" class="navBtn">Config</button>
+        <button data-view="smtp-config" class="navBtn">SMTP Config</button>
+        <button data-view="sms-config" class="navBtn">SMS Config</button>
       </nav>
       <div class="env" id="envInfo"></div>
       <div id="roleContext" style="background: #2a2a2a; padding: 8px; margin: 4px 0; border: 1px solid #555; border-radius: 4px; display: none;">
@@ -259,6 +260,109 @@
           <div class="status" id="smsComposeStatus"></div>
         </form>
       </div>
+    </main>
+    <main class="layout" id="view-sms-config" style="display:none">
+      <!-- Role Context Indicator -->
+      <section class="panel fullwidth" id="smsRoleContextIndicator" style="background: #2a2a2a; border: 1px solid #555; margin-bottom: 15px; display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <span style="color: #81c784; font-weight: bold;">📋 Tenant Context:</span>
+            <span id="smsContextTenantName" style="color: #fff; margin-left: 8px;"></span>
+          </div>
+          <button id="smsExitContextBtn" class="config-btn config-btn-secondary">← Back to Superadmin</button>
+        </div>
+      </section>
+
+      <!-- Global SMS Configuration Management -->
+      <section class="panel fullwidth" id="smsGlobalConfigSection">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+          <h2 style="margin: 0; color: #4fc3f7;">📱 Global SMS Configurations</h2>
+          <button id="addGlobalSmsConfigBtn" class="config-btn config-btn-primary">+ Add Global SMS Config</button>
+        </div>
+        
+        <div id="globalSmsConfigCards" style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px;">
+          <!-- Global SMS config cards will be populated here -->
+        </div>
+        
+        <div id="noGlobalSmsConfigs" style="display: none; text-align: center; padding: 32px; color: #888; border: 2px dashed #444; border-radius: 8px;">
+          <div style="font-size: 2rem; margin-bottom: 8px;">📱</div>
+          <p style="margin: 0; font-size: 1.1rem; font-weight: bold;">No global SMS configurations yet</p>
+          <p style="margin: 8px 0 0 0; font-size: 0.9rem;">Global configs provide fallback SMS service for all tenants</p>
+        </div>
+      </section>
+      
+      <!-- Tenant SMS Overview Section -->
+      <section class="panel fullwidth" id="smsTenantOverviewSection">
+        <h2 style="margin: 0 0 16px 0; color: #81c784;">🏢 Tenant SMS Configuration Overview</h2>
+        <div id="smsConfigTree" style="font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre; background: #1a1a1a; padding: 16px; border-radius: 6px; border: 1px solid #333;">
+          <div class="tree-loading">Loading SMS configuration tree...</div>
+        </div>
+        
+        <div style="margin-top: 12px; font-size: 0.9rem; color: #999; display: flex; align-items: center; gap: 8px;">
+          <span>💡</span>
+          <span><strong>Tip:</strong> Click on any tenant name to switch context and manage their specific SMS configuration</span>
+        </div>
+      </section>
+
+      <!-- Legacy SMS Config Editor (hidden, for backward compatibility) -->
+      <section class="panel fullwidth" id="smsConfigEditor" style="display:none">
+        <h2 id="smsConfigEditorTitle">SMS Configuration Editor</h2>
+        <div class="config-actions" style="margin-bottom: 15px;">
+          <button type="button" id="addGlobalSmsBtn" class="config-btn">Add Global SMS Config</button>
+          <button type="button" id="addTenantSmsBtn" class="config-btn" style="display:none">Add Tenant SMS Config</button>
+          <button type="button" id="addAppSmsBtn" class="config-btn" style="display:none">Add App SMS Config</button>
+          <button type="button" id="cancelEditSmsBtn" class="config-btn config-btn-secondary">Cancel</button>
+        </div>
+        
+        <form id="smsConfigForm">
+          <input type="hidden" name="scope" id="smsConfigScope" />
+          <input type="hidden" name="tenantId" id="smsConfigTenantId" />
+          <input type="hidden" name="appId" id="smsConfigAppId" />
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+              <div class="form-group">
+                <label for="smsSid">Twilio Account SID</label>
+                <input type="text" name="sid" id="smsSid" class="form-control" placeholder="Account SID" required>
+              </div>
+              
+              <div class="form-group">
+                <label for="smsToken">Twilio Auth Token</label>
+                <input type="password" name="token" id="smsToken" class="form-control" placeholder="Auth Token" required>
+              </div>
+              
+              <div class="form-group">
+                <label for="smsFromNumber">From Phone Number</label>
+                <input type="tel" name="fromNumber" id="smsFromNumber" class="form-control" placeholder="+1234567890" required>
+              </div>
+            </div>
+            
+            <div>
+              <div class="form-group">
+                <label for="smsFallbackTo">Fallback Phone Number (Optional)</label>
+                <input type="tel" name="fallbackTo" id="smsFallbackTo" class="form-control" placeholder="+1234567890">
+              </div>
+              
+              <div class="form-group">
+                <label for="smsServiceSid">Messaging Service SID (Optional)</label>
+                <input type="text" name="serviceSid" id="smsServiceSid" class="form-control" placeholder="Messaging Service SID">
+              </div>
+              
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" name="isActive" id="smsIsActive" checked> Active Configuration
+                </label>
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save SMS Configuration</button>
+            <button type="button" id="deleteSmsConfigBtn" class="btn btn-danger" style="display:none">Delete</button>
+            <button type="button" id="testSmsConfigBtn" class="btn btn-secondary">Test Configuration</button>
+          </div>
+        </form>
+      </section>
     </main>
     <main class="layout" id="view-smtp-config" style="display:none">
       <!-- Role Context Indicator -->
@@ -504,6 +608,124 @@
         </div>
         
         <div id="appConfigStatus" class="status"></div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- SMS Configuration Modal -->
+  <div id="smsConfigModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: #1e1e1e; padding: 24px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 id="smsModalTitle" style="margin: 0; color: #4fc3f7;">SMS Configuration</h2>
+        <button id="closeSmsModalBtn" style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 4px;">&times;</button>
+      </div>
+      
+      <form id="smsGlobalConfigForm" style="display: flex; flex-direction: column; gap: 16px;">
+        <input type="hidden" id="smsEditConfigId" />
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label for="modalSmsSid">Twilio Account SID *</label>
+            <input type="text" id="modalSmsSid" class="form-control" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="modalSmsToken">Twilio Auth Token *</label>
+            <input type="password" id="modalSmsToken" class="form-control" placeholder="Your auth token" required>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label for="modalSmsFromNumber">From Phone Number *</label>
+            <input type="tel" id="modalSmsFromNumber" class="form-control" placeholder="+1234567890" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="modalSmsFallbackTo">Fallback Phone Number</label>
+            <input type="tel" id="modalSmsFallbackTo" class="form-control" placeholder="+1234567890">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="modalSmsServiceSid">Messaging Service SID (Optional)</label>
+          <input type="text" id="modalSmsServiceSid" class="form-control" placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+          <small style="color: #888; font-size: 0.85rem; margin-top: 4px;">If provided, messages will use the messaging service instead of the from number</small>
+        </div>
+        
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="modalSmsIsActive" checked>
+            <span>Active Configuration</span>
+          </label>
+          <small style="color: #888; font-size: 0.85rem; margin-top: 4px;">Only one configuration can be active per scope level</small>
+        </div>
+        
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+          <button type="submit" class="config-btn config-btn-primary">Save SMS Configuration</button>
+          <button type="button" id="deleteSmsModalBtn" class="config-btn config-btn-danger" style="display: none;">Delete</button>
+          <button type="button" id="cancelSmsModalBtn" class="config-btn config-btn-secondary">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- App SMS Configuration Modal -->
+  <div id="appSmsConfigModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: #1e1e1e; padding: 24px; max-width: 600px; width: 100%; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 id="appSmsModalTitle" style="margin: 0; color: #4fc3f7;">App SMS Configuration</h2>
+        <button id="closeAppSmsModalBtn" style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 4px;">&times;</button>
+      </div>
+      
+      <form id="appSmsConfigForm" style="display: flex; flex-direction: column; gap: 16px;">
+        <input type="hidden" id="appSmsEditConfigId" />
+        <input type="hidden" id="appSmsConfigAppId" />
+        <input type="hidden" id="appSmsConfigTenantId" />
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label for="appModalSmsSid">Twilio Account SID *</label>
+            <input type="text" id="appModalSmsSid" class="form-control" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="appModalSmsToken">Twilio Auth Token *</label>
+            <input type="password" id="appModalSmsToken" class="form-control" placeholder="Your auth token" required>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label for="appModalSmsFromNumber">From Phone Number *</label>
+            <input type="tel" id="appModalSmsFromNumber" class="form-control" placeholder="+1234567890" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="appModalSmsFallbackTo">Fallback Phone Number</label>
+            <input type="tel" id="appModalSmsFallbackTo" class="form-control" placeholder="+1234567890">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="appModalSmsServiceSid">Messaging Service SID (Optional)</label>
+          <input type="text" id="appModalSmsServiceSid" class="form-control" placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+          <small style="color: #888; font-size: 0.85rem; margin-top: 4px;">If provided, messages will use the messaging service instead of the from number</small>
+        </div>
+        
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="appModalSmsIsActive" checked>
+            <span>Active Configuration</span>
+          </label>
+          <small style="color: #888; font-size: 0.85rem; margin-top: 4px;">Only one configuration can be active per app</small>
+        </div>
+        
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+          <button type="submit" class="config-btn config-btn-primary">Save SMS Configuration</button>
+          <button type="button" id="deleteAppSmsModalBtn" class="config-btn config-btn-danger" style="display: none;">Delete</button>
+          <button type="button" id="cancelAppSmsModalBtn" class="config-btn config-btn-secondary">Cancel</button>
+        </div>
       </form>
     </div>
   </div>
