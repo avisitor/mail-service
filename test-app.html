@@ -223,21 +223,28 @@
     </div>
 
     <script>
-        // Application configurations
+        // Application configurations with client secrets for secure authentication
         const apps = {
             'retree-hawaii': {
                 name: 'ReTree Hawaii App',
                 appId: 'cmfka688r0001b77ofpgm57ix',
-                description: 'Forest restoration and tree planting application'
+                clientId: 'retree-hawaii-client',
+                // In production, this should be loaded from secure environment variables
+                clientSecret: 'HPWt1XoWcAwHVFSwjGYUc/Znci/D0rjlBv1IrHmoNI8=',
+                description: 'Forest restoration and tree planting application (inherits Robs World Gmail SMTP)'
             },
             'outings': {
                 name: 'Outings Management',
                 appId: 'outings-app-id',
-                description: 'Sierra Club Maui outings management system'
+                clientId: 'outings-client',
+                // In production, this should be loaded from secure environment variables
+                clientSecret: 'DTlNwEBSUpusSOCcf/yqxXwXxrgG3a8S1MyRCPo5bhs=',
+                description: 'Sierra Club Maui outings management system (inherits Robs World Gmail SMTP)'
             },
             'invalid-app': {
                 name: 'Invalid Application',
                 appId: 'invalid-app-does-not-exist',
+                clientId: 'invalid-client',
                 description: 'Testing with non-existent appId'
             }
         };
@@ -620,7 +627,7 @@
                     },
                     body: JSON.stringify({
                         appId: app.appId,
-                        templateId: 'tpl_00000090_school_-_please_join_us',
+                        templateId: 'tpl_00000090_school___please_join_us',
                         recipients: recipients
                     })
                 });
@@ -633,7 +640,7 @@
                         `Group ID: ${result.groupId}\\n` +
                         `Jobs Created: ${result.jobCount}\\n` +
                         `Recipients: ${recipients.length}\\n\\n` +
-                        `Check MailHog for the processed template emails with variable substitution.`, 
+                        `Emails sent via ${apps[currentApp].name} SMTP configuration with variable substitution.`, 
                         'success');
                 } else {
                     throw new Error(result.message || 'API call failed');
@@ -777,24 +784,35 @@
         // Helper function to get authentication token
         async function getAuthToken() {
             try {
-                // For testing, we'll use the same token generation approach as the backend test
-                // In a real app, this would come from your authentication system
-                const response = await fetch('/api/test-token', {
+                // Always use secure app authentication with client secrets
+                const app = apps[currentApp];
+                
+                if (!app.clientSecret) {
+                    throw new Error(`No client secret configured for ${app.name}. This app cannot use secure authentication.`);
+                }
+                
+                const response = await fetch('/api/token', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ appId: apps[currentApp].appId })
+                    body: JSON.stringify({ 
+                        appId: app.appId,
+                        clientSecret: app.clientSecret,
+                        type: 'application'
+                    })
                 });
                 
                 if (response.ok) {
                     const data = await response.json();
-                    return data.token;
+                    console.log(`✅ Secure authentication successful for ${app.name}`);
+                    return `Bearer ${data.token}`;
+                } else {
+                    const errorData = await response.json().catch(() => null);
+                    throw new Error(`Authentication failed: ${errorData?.message || response.statusText}`);
                 }
                 
-                // Fallback: return null and let the main function handle the error
-                return null;
             } catch (error) {
-                console.error('Error getting auth token:', error);
-                return null;
+                console.error('❌ Secure authentication error:', error);
+                throw error;
             }
         }
         

@@ -92,6 +92,7 @@ async function getTransporterAsync(tenantId?: string, appId?: string): Promise<T
       host: smtpConfig.host,
       port: smtpConfig.port,
       secure: smtpConfig.secure,
+      requireTLS: smtpConfig.port === 587, // Use STARTTLS for port 587
       auth: smtpConfig.user ? { 
         user: smtpConfig.user, 
         pass: smtpConfig.pass 

@@ -370,15 +370,21 @@ export function buildApp() {
     }
   });
   
-  // Application token endpoint for silent authentication
+  // Application token endpoint for client secret authentication
   app.post('/api/token', async (req, reply) => {
-    const { appId, type } = (req.body as any) || {};
+    const { appId, clientSecret, type } = (req.body as any) || {};
     
+    // Validate required parameters
     if (!appId || type !== 'application') {
       return reply.badRequest('appId and type=application required');
     }
     
+    // Check if we're in secure mode (production) or development mode
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    const allowInsecure = process.env.ALLOW_INSECURE_APP_TOKENS === 'true';
+    
     try {
+      const bcrypt = await import('bcrypt');
       const prismaModule = await import('./db/prisma.js');
       const prisma = prismaModule.getPrisma();
       
@@ -392,7 +398,54 @@ export function buildApp() {
         return reply.notFound('Application not found');
       }
       
-      // Generate a simple application token (in production this would be more secure)
+      // Type cast to access clientSecret field (Prisma typing issue)
+      const appWithSecret = appRecord as any;
+      
+      // Security validation
+      const secureMode = !isDevelopment || !allowInsecure;
+      
+      if (secureMode) {
+        // Production mode or secure development mode - require client secret
+        if (!clientSecret) {
+          app.log.warn({ appId }, 'Token request missing client secret');
+          return reply.unauthorized('Client secret required for token generation');
+        }
+        
+        if (!appWithSecret.clientSecret) {
+          app.log.warn({ appId: appRecord.id }, 'App has no client secret configured');
+          return reply.unauthorized('Application not configured for secure authentication');
+        }
+        
+        // Verify client secret
+        const isValidSecret = await bcrypt.compare(clientSecret, appWithSecret.clientSecret);
+        if (!isValidSecret) {
+          app.log.warn({ appId: appRecord.id, clientId: appRecord.clientId }, 'Invalid client secret provided');
+          return reply.unauthorized('Invalid client credentials');
+        }
+        
+        app.log.info({ appId: appRecord.id, clientId: appRecord.clientId }, 'Secure token generated with client secret verification');
+      } else {
+        // Development mode with insecure tokens allowed
+        // BUT still validate client secret if provided
+        if (clientSecret && appWithSecret.clientSecret) {
+          const isValidSecret = await bcrypt.compare(clientSecret, appWithSecret.clientSecret);
+          if (!isValidSecret) {
+            app.log.warn({ appId: appRecord.id, clientId: appRecord.clientId }, 'Invalid client secret provided');
+            return reply.unauthorized('Invalid client credentials');
+          }
+        }
+        
+        app.log.warn({ 
+          appId: appRecord.id, 
+          clientId: appRecord.clientId,
+          hasSecret: !!clientSecret,
+          hasStoredSecret: !!appWithSecret.clientSecret
+        }, 'INSECURE: Token generated without client secret verification (development mode)');
+      }
+      
+      // Generate JWT token with unique timestamp
+      const now = Date.now();
+      const iat = Math.floor(now / 1000);
       const payload = {
         sub: `app:${appRecord.id}`,
         appId: appRecord.id,
@@ -401,16 +454,30 @@ export function buildApp() {
         roles: ['app'],
         iss: config.auth.issuer,
         aud: config.auth.audience,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (60 * 15) // 15 minutes
+        iat: iat,
+        exp: iat + (60 * 15), // 15 minutes
+        jti: `${appRecord.id}-${now}` // Unique token ID
       };
       
       const token = jwt.sign(payload, config.internalJwtSecret);
       
-      return { token, expiresIn: 900 };
+      return { 
+        token, 
+        expiresIn: 900,
+        developmentMode: !secureMode,
+        // Include security info in development
+        ...(isDevelopment && { 
+          security: {
+            mode: allowInsecure ? 'insecure-development' : 'secure',
+            clientSecretRequired: !allowInsecure,
+            clientSecretProvided: !!clientSecret,
+            appHasSecret: !!appWithSecret.clientSecret
+          }
+        })
+      };
       
     } catch (e: any) {
-      app.log.error({ err: e }, 'Error generating application token');
+      app.log.error({ err: e, appId }, 'Error generating application token');
       return reply.internalServerError('Failed to generate token');
     }
   });

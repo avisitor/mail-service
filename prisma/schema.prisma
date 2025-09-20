@@ -14,35 +14,36 @@ model Tenant {
   createdAt    DateTime       @default(now())
   apps         App[]
   MessageGroup MessageGroup[]
-  smtpConfigs  SmtpConfig[]
   smsConfigs   SmsConfig[]
+  smtpConfigs  SmtpConfig[]
   suppressions Suppression[]
 }
 
 model App {
-  id        String   @id @default(cuid())
-  tenantId  String
-  name      String
-  clientId  String   @unique
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  groups    MessageGroup[]
-  smtpConfigs SmtpConfig[]
-  smsConfigs  SmsConfig[]
+  id           String         @id @default(cuid())
+  tenantId     String
+  name         String
+  clientId     String         @unique
+  createdAt    DateTime       @default(now())
+  clientSecret String?
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  groups       MessageGroup[]
+  smsConfigs   SmsConfig[]
+  smtpConfigs  SmtpConfig[]
 
   @@index([tenantId], map: "App_tenantId_fkey")
 }
 
 model Template {
   id           String         @id @default(cuid())
-  appId        String         @default("retreehawaii")
-  title        String?        @db.VarChar(64)
-  content      String?        @db.MediumText
   version      Int
   subject      String?        @db.MediumText
   isActive     Boolean        @default(true)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @default(now()) @updatedAt
+  appId        String         @default("retreehawaii")
+  content      String?        @db.MediumText
+  title        String?        @db.VarChar(64)
   MessageGroup MessageGroup[]
 }
 
@@ -66,11 +67,11 @@ model MessageGroup {
   failedCount         Int         @default(0)
   canceledAt          DateTime?
   lockVersion         Int         @default(0)
-  recipients          Recipient[]
   events              Event[]
+  app                 App         @relation(fields: [appId], references: [id], onDelete: Cascade)
   template            Template?   @relation(fields: [templateId], references: [id])
   tenant              Tenant      @relation(fields: [tenantId], references: [id])
-  app                 App         @relation(fields: [appId], references: [id], onDelete: Cascade)
+  recipients          Recipient[]
 
   @@index([appId], map: "MessageGroup_appId_fkey")
   @@index([templateId], map: "MessageGroup_templateId_fkey")
@@ -90,9 +91,9 @@ model Recipient {
   renderedHtml    String?
   renderedText    String?
   failedAttempts  Int          @default(0)
-  group           MessageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  messages        Message[]
   events          Event[]
+  messages        Message[]
+  group           MessageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, email])
   @@index([groupId, status])
@@ -120,12 +121,12 @@ model Event {
   occurredAt  DateTime      @default(now())
   meta        String?       @db.LongText
   createdAt   DateTime      @default(now())
-  recipient   Recipient?    @relation(fields: [recipientId], references: [id], onDelete: Cascade, map: "Event_recipientId_fkey")
   group       MessageGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, map: "Event_groupId_fkey")
+  recipient   Recipient?    @relation(fields: [recipientId], references: [id], onDelete: Cascade, map: "Event_recipientId_fkey")
 
   @@index([type])
-  @@index([groupId], map: "Event_groupId_idx")
-  @@index([recipientId], map: "Event_recipientId_idx")
+  @@index([groupId])
+  @@index([recipientId], map: "Event_recipientId_fkey")
 }
 
 model Suppression {
@@ -159,37 +160,36 @@ model SmtpConfig {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   createdBy    String?
-  tenant       Tenant?         @relation(fields: [tenantId], references: [id])
   app          App?            @relation(fields: [appId], references: [id], onDelete: Cascade)
+  tenant       Tenant?         @relation(fields: [tenantId], references: [id])
 
   @@index([scope, tenantId, appId])
-  @@index([scope, isActive]) // For efficient queries of active configs
+  @@index([scope, isActive])
   @@index([appId], map: "SmtpConfig_appId_fkey")
   @@index([tenantId], map: "SmtpConfig_tenantId_fkey")
 }
 
 model SmsConfig {
-  id          String         @id @default(cuid())
-  scope       SmsConfigScope
-  tenantId    String?        // null for GLOBAL scope
-  appId       String?        // null for GLOBAL/TENANT scope
-  tenant      Tenant?        @relation(fields: [tenantId], references: [id])
-  app         App?           @relation(fields: [appId], references: [id], onDelete: Cascade)
-  
-  // Twilio settings
-  sid         String         // Account SID
-  token       String         // Auth Token (encrypted in implementation)
-  fromNumber  String         // Sending phone number
-  fallbackTo  String?        // Fallback number for errors
-  serviceSid  String?        // Messaging Service SID (optional)
-  
-  isActive    Boolean        @default(true)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  createdBy   String?        // user sub who created this config
-  
+  id         String         @id @default(cuid())
+  scope      SmsConfigScope
+  tenantId   String?
+  appId      String?
+  sid        String
+  token      String
+  fromNumber String
+  fallbackTo String?
+  serviceSid String?
+  isActive   Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  createdBy  String?
+  app        App?           @relation(fields: [appId], references: [id], onDelete: Cascade)
+  tenant     Tenant?        @relation(fields: [tenantId], references: [id])
+
   @@index([scope, tenantId, appId])
-  @@index([scope, isActive]) // For efficient queries of active configs
+  @@index([scope, isActive])
+  @@index([appId], map: "SmsConfig_appId_fkey")
+  @@index([tenantId], map: "SmsConfig_tenantId_fkey")
 }
 
 model EmailJob {

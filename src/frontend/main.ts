@@ -89,6 +89,13 @@ class ViewRegistry {
         el.classList.toggle('active', el.getAttribute('data-view') === viewName)
       );
       
+      // Update compose view titles if we're switching to a compose view
+      if (viewName === 'compose' || viewName === 'sms-compose') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentAppId = urlParams.get('appId');
+        updateViewTitle(viewName, currentAppId || undefined);
+      }
+      
       console.debug(`[ViewRegistry] Switched to view: ${viewName}`);
     }
   }
@@ -248,10 +255,28 @@ class ComposeView implements IView {
   async activate(): Promise<void> {
     console.log('[ComposeView] Activating compose view');
     
-    // Get appId from URL parameters
+    // Get appId from URL parameters first
     const urlParams = new URLSearchParams(window.location.search);
     const appIdFromUrl = urlParams.get('appId');
     const recipientsFromUrl = urlParams.get('recipients');
+    const returnUrlFromUrl = urlParams.get('returnUrl');
+    
+    // Set currentAppId for this view
+    if (appIdFromUrl) {
+      this.currentAppId = appIdFromUrl;
+    }
+    
+    // Update title with current app info
+    const titleElement = document.getElementById('viewTitle');
+    if (titleElement) {
+      updateViewTitle('compose', this.currentAppId || undefined);
+    }
+    
+    // Save returnUrl to localStorage for editor workflows
+    if (returnUrlFromUrl) {
+      localStorage.setItem('editorReturnUrl', returnUrlFromUrl);
+      console.log('[ComposeView] Saved returnUrl for editor workflow:', returnUrlFromUrl);
+    }
     
     console.log('[ComposeView] URL params - appId:', appIdFromUrl, 'recipients:', recipientsFromUrl);
     
@@ -269,6 +294,9 @@ class ComposeView implements IView {
       this.currentAppId = appIdFromUrl;
       this.templateManager.setAppId(appIdFromUrl);
       
+      // Update title now that we have the appId
+      updateViewTitle('compose', this.currentAppId);
+      
       console.log('[ComposeView] Using appId from URL:', appIdFromUrl);
       
       // Update URL to clean up parameters while preserving appId
@@ -282,6 +310,9 @@ class ComposeView implements IView {
       
       // Initialize TinyMCE for rich text editing
       await this.initTinyMCE();
+      
+      // Show/hide buttons based on user role
+      this.updateButtonVisibility();
       
       // If recipients were provided in URL, populate them
       if (this.recipientsData.length > 0) {
@@ -317,9 +348,23 @@ class ComposeView implements IView {
         await this.loadComposeData();
         this.setupComposeEventListeners();
         await this.initTinyMCE();
+        this.updateButtonVisibility();
       } else {
         console.warn('[ComposeView] No appId found in URL or saved state');
       }
+    }
+  }
+
+  private updateButtonVisibility(): void {
+    const roles: string[] = state.user?.roles || [];
+    const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnUrl = urlParams.get('returnUrl');
+    
+    // Show Cancel button for editors who have a return URL
+    const cancelBtn = document.getElementById('cancelEmailBtn') as HTMLElement;
+    if (cancelBtn) {
+      cancelBtn.style.display = (isEditorOnly && returnUrl) ? 'inline-block' : 'none';
     }
   }
 
@@ -625,6 +670,15 @@ class ComposeView implements IView {
       this.saveState();
     }, 2000);
 
+    // Form submission handler
+    const composeForm = document.getElementById('composeForm') as HTMLFormElement;
+    if (composeForm) {
+      composeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await sendComposedMessage();
+      });
+    }
+
     // Add event listeners to form elements
     const recipients = document.querySelector('#recipients') as HTMLTextAreaElement;
     const subject = document.querySelector('#subject') as HTMLInputElement;
@@ -818,6 +872,12 @@ class TemplateEditorView implements IView {
 
   async activate(): Promise<void> {
     console.log('[TemplateEditorView] Activating template editor view');
+    
+    // Update title
+    const titleElement = document.getElementById('viewTitle');
+    if (titleElement) {
+      updateViewTitle('template-editor');
+    }
     
     // Get parameters from URL
     const urlParams = new URLSearchParams(window.location.search);
@@ -1238,10 +1298,21 @@ class SmsComposeView implements IView {
   async activate(): Promise<void> {
     console.log('[SmsComposeView] Activating SMS compose view');
     
-    // Get appId from URL parameters
+    // Get appId from URL parameters first
     const urlParams = new URLSearchParams(window.location.search);
     const appIdFromUrl = urlParams.get('appId');
     const smsSessionKey = urlParams.get('smsSession');
+    
+    // Set currentAppId for this view
+    if (appIdFromUrl) {
+      this.currentAppId = appIdFromUrl;
+    }
+    
+    // Update title with current app info
+    const titleElement = document.getElementById('viewTitle');
+    if (titleElement) {
+      updateViewTitle('sms-compose', this.currentAppId || undefined);
+    }
     
     // Check URL parameters for SMS data first
     let phoneNumbersFromUrl = urlParams.get('phoneNumbers');
@@ -1298,6 +1369,9 @@ class SmsComposeView implements IView {
     if (appIdFromUrl) {
       this.currentAppId = appIdFromUrl;
       
+      // Update title now that we have the appId
+      updateViewTitle('sms-compose', this.currentAppId);
+      
       // Update URL to clean up parameters while preserving appId
       const url = new URL(window.location.href);
       url.searchParams.set('appId', appIdFromUrl);
@@ -1346,10 +1420,24 @@ class SmsComposeView implements IView {
       if (savedAppId) {
         this.setupEventListeners();
         this.updateAppContext();
+        this.updateButtonVisibility();
         await this.restoreState({});
       } else {
         console.warn('[SmsComposeView] No appId found in URL or saved state');
       }
+    }
+  }
+
+  private updateButtonVisibility(): void {
+    const roles: string[] = state.user?.roles || [];
+    const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnUrl = urlParams.get('returnUrl');
+    
+    // Show Cancel button for editors who have a return URL
+    const cancelBtn = document.getElementById('cancelSmsBtn') as HTMLElement;
+    if (cancelBtn) {
+      cancelBtn.style.display = (isEditorOnly && returnUrl) ? 'inline-block' : 'none';
     }
   }
 
@@ -1478,8 +1566,28 @@ class SmsComposeView implements IView {
     const contextElement = document.getElementById('smsAppContext');
     if (contextElement && this.currentAppId) {
       const app = state.apps.find(a => a.id === this.currentAppId);
-      const appName = app?.name || this.currentAppId;
-      contextElement.textContent = `App: ${appName}`;
+      const appName = app?.name;
+      
+      // Check if user is editor-only
+      const roles: string[] = state.user?.roles || [];
+      const isEditorOnly = roles.includes('editor') && !roles.includes('tenant_admin') && !roles.includes('superadmin');
+      
+      if (isEditorOnly) {
+        // For editors, either show the app name or hide the context entirely
+        if (appName) {
+          contextElement.textContent = appName;
+        } else {
+          // Hide the entire context section if we don't have a proper app name
+          const contextSection = contextElement.closest('div[style*="background: #2a2a2a"]');
+          if (contextSection) {
+            (contextSection as HTMLElement).style.display = 'none';
+          }
+        }
+      } else {
+        // For admins, show technical details
+        const displayName = appName || this.currentAppId;
+        contextElement.textContent = `App: ${displayName}`;
+      }
     }
   }
 
@@ -1734,7 +1842,7 @@ class AppsView implements IView {
     // Update title
     const titleElement = document.getElementById('viewTitle');
     if (titleElement) {
-      titleElement.textContent = getAppsViewTitle();
+      updateViewTitle('apps');
     }
     
     // Load apps for current context
@@ -1776,7 +1884,7 @@ class TenantsView implements IView {
     // Update title
     const titleElement = document.getElementById('viewTitle');
     if (titleElement) {
-      titleElement.textContent = 'Tenant Management';
+      updateViewTitle('tenants');
     }
     
     // Load tenants
@@ -1818,7 +1926,7 @@ class SmtpConfigView implements IView {
     // Update title
     const titleElement = document.getElementById('viewTitle');
     if (titleElement) {
-      titleElement.textContent = 'Configuration';
+      updateViewTitle('smtp-config');
     }
     
     // Load and display configs
@@ -1861,7 +1969,7 @@ class SmsConfigView implements IView {
     // Update title
     const titleElement = document.getElementById('viewTitle');
     if (titleElement) {
-      titleElement.textContent = 'SMS Configuration';
+      updateViewTitle('sms-config');
     }
     
     // Load and display configs
@@ -2344,6 +2452,9 @@ async function loadApps() {
     const sel = document.getElementById('appSelect') as HTMLSelectElement;
     sel.innerHTML = '<option value="">-- select --</option>' + list.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
     if (appId && list.some(a=>a.id===appId)) sel.value = appId; else sel.value = '';
+    
+    // Update titles if we're in a compose view
+    refreshComposeViewTitles();
   } catch {/* ignore */}
 }
 
@@ -2353,8 +2464,41 @@ async function loadAllApps() {
     const list: AppRec[] = await api('/apps');
     state.apps = list;
     console.log('Loaded apps:', list);
+    
+    // Update titles if we're in a compose view
+    refreshComposeViewTitles();
   } catch (e) {
     console.error('Failed to load all apps:', e);
+  }
+}
+
+async function loadAppForEditor() {
+  try {
+    // Get the appId from URL parameters for editor contexts
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentAppId = urlParams.get('appId');
+    
+    if (!currentAppId) {
+      console.log('[loadAppForEditor] No appId in URL parameters');
+      return;
+    }
+    
+    console.log('[loadAppForEditor] Loading app for editor:', currentAppId);
+    
+    // Load the specific app info - this should work for editors since they have access to their own app
+    const appInfo = await api(`/apps/${encodeURIComponent(currentAppId)}`);
+    
+    // Initialize state.apps with just this one app
+    state.apps = [appInfo];
+    
+    console.log('[loadAppForEditor] Loaded app for editor:', appInfo);
+    
+    // Update titles if we're in a compose view
+    refreshComposeViewTitles();
+  } catch (e) {
+    console.error('[loadAppForEditor] Failed to load app for editor:', e);
+    // If we can't load the app info, at least initialize an empty array
+    state.apps = [];
   }
 }
 
@@ -2454,7 +2598,16 @@ function onAuthenticated(cameFromIdp: boolean = false) {
       tenantId = state.user.tenantId;
       localStorage.setItem('tenantId', tenantId);
     }
-    if (tenantId) await loadApps();
+    
+    // Skip loading apps for editor-only users to avoid 403 errors
+    const roleList: string[] = state.user?.roles || [];
+    const isEditorOnly = roleList.includes('editor') && !roleList.some(r=> r==='tenant_admin' || r==='superadmin');
+    if (tenantId && !isEditorOnly) {
+      await loadApps();
+    } else if (isEditorOnly) {
+      // For editor-only users, try to load the specific app they're working with
+      await loadAppForEditor();
+    }
     updateEnvInfo();
     
     // Skip legacy template/group loading when on compose view
@@ -2628,8 +2781,77 @@ function updateEnvInfo() {
 
 async function detectMode() { state.dbMode = true; }
 
-function composeHeaderTitle() {
-  const app = state.apps.find(a=>a.id===appId); return app ? `Compose - App: ${app.name}` : 'Compose Email';
+function getViewTitle(viewName: string, currentAppId?: string): { appTitle: string; viewFunction: string } {
+  // Get app name from various sources, including the passed currentAppId
+  const targetAppId = currentAppId || 
+                      new URLSearchParams(window.location.search).get('appId') || 
+                      appId || '';
+  
+  const appLabel = state.user?.appName || state.user?.appClientId || 
+                   state.apps.find(a=>a.id===state.user?.appId)?.name || 
+                   state.apps.find(a=>a.id===targetAppId)?.name || '';
+  
+  // Determine view function name
+  let viewFunction = '';
+  switch (viewName) {
+    case 'compose':
+      viewFunction = 'Compose Email';
+      break;
+    case 'sms-compose':
+      viewFunction = 'Send SMS';
+      break;
+    case 'apps':
+      return { appTitle: getAppsViewTitle(), viewFunction: '' };
+    case 'tenants':
+      viewFunction = 'Tenant Management';
+      break;
+    case 'smtp-config':
+      viewFunction = 'Email Configuration';
+      break;
+    case 'sms-config':
+      viewFunction = 'SMS Configuration';
+      break;
+    case 'template-editor':
+      viewFunction = 'Template Editor';
+      break;
+    default:
+      viewFunction = 'Mail Service';
+  }
+  
+  // For editors and app-specific contexts, show app name prominently
+  if (appLabel && (viewName === 'compose' || viewName === 'sms-compose')) {
+    return { appTitle: appLabel, viewFunction: viewFunction };
+  }
+  
+  return { appTitle: viewFunction, viewFunction: '' };
+}
+
+function refreshComposeViewTitles() {
+  // Check if we're in a compose view and update the title
+  const currentPath = window.location.pathname;
+  const urlParams = new URLSearchParams(window.location.search);
+  const view = urlParams.get('view');
+  const currentAppId = urlParams.get('appId');
+  
+  if (view === 'compose') {
+    updateViewTitle('compose', currentAppId || undefined);
+  } else if (view === 'sms-compose') {
+    updateViewTitle('sms-compose', currentAppId || undefined);
+  }
+}
+
+function updateViewTitle(viewName: string, currentAppId?: string) {
+  const titleInfo = getViewTitle(viewName, currentAppId);
+  const appTitleElement = document.getElementById('appTitle');
+  const viewFunctionElement = document.getElementById('viewFunction');
+  
+  if (appTitleElement) {
+    appTitleElement.textContent = titleInfo.appTitle;
+  }
+  if (viewFunctionElement) {
+    viewFunctionElement.textContent = titleInfo.viewFunction;
+    viewFunctionElement.style.display = titleInfo.viewFunction ? 'block' : 'none';
+  }
 }
 
 function getAppsViewTitle() {
@@ -2681,6 +2903,10 @@ async function loadAppsForTenant(tenantId: string) {
   try {
     const list: AppRec[] = await api(`/apps?tenantId=${encodeURIComponent(tenantId)}`);
     state.apps = list;
+    
+    // Update titles if we're in a compose view
+    refreshComposeViewTitles();
+    
     return list;
   } catch (e) {
     console.error('Failed to load apps for tenant:', e);
@@ -2821,6 +3047,9 @@ function updateNavigationVisibility() {
   const tenantsNavBtn = document.querySelector('[data-view="tenants"]') as HTMLElement;
   const templateEditorNavBtn = document.querySelector('[data-view="template-editor"]') as HTMLElement;
   const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]') as HTMLElement;
+  const smsConfigBtn = document.querySelector('[data-view="sms-config"]') as HTMLElement;
+  const composeNavBtn = document.querySelector('[data-view="compose"]') as HTMLElement;
+  const smsComposeNavBtn = document.querySelector('[data-view="sms-compose"]') as HTMLElement;
   
   if (appsNavBtn) {
     // Apps button visible for tenant_admin and superadmin (in any context)
@@ -2844,6 +3073,43 @@ function updateNavigationVisibility() {
     if (!isEditorOnly) {
       smtpConfigBtn.textContent = 'Config';
     }
+  }
+
+  if (smsConfigBtn) {
+    // SMS Config button hidden for editor-only users
+    smsConfigBtn.style.display = isEditorOnly ? 'none' : 'block';
+  }
+
+  // For editor-only users, hide ALL navigation buttons and admin UI elements
+  if (isEditorOnly) {
+    if (composeNavBtn) composeNavBtn.style.display = 'none';
+    if (smsComposeNavBtn) smsComposeNavBtn.style.display = 'none';
+    
+    // Hide admin UI elements for editors
+    const envInfo = document.getElementById('envInfo');
+    const roleContext = document.getElementById('roleContext');
+    const userPane = document.getElementById('userPane');
+    const topnav = document.querySelector('.topnav') as HTMLElement;
+    
+    if (envInfo) envInfo.style.display = 'none';
+    if (roleContext) roleContext.style.display = 'none';
+    if (userPane) userPane.style.display = 'none';
+    if (topnav) topnav.style.display = 'none';
+  } else {
+    // For non-editors, show the compose navigation buttons and admin UI
+    if (composeNavBtn) composeNavBtn.style.display = 'block';
+    if (smsComposeNavBtn) smsComposeNavBtn.style.display = 'block';
+    
+    // Show admin UI elements for non-editors
+    const envInfo = document.getElementById('envInfo');
+    const roleContext = document.getElementById('roleContext');
+    const userPane = document.getElementById('userPane');
+    const topnav = document.querySelector('.topnav') as HTMLElement;
+    
+    if (envInfo) envInfo.style.display = 'block';
+    if (userPane) userPane.style.display = 'flex';
+    if (topnav) topnav.style.display = 'block';
+    // roleContext display is handled by updateRoleContext function
   }
 }
 
@@ -2963,8 +3229,8 @@ function showView(view: string) {
   const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
   const isTenantAdmin = roles.includes('tenant_admin') || roles.includes('superadmin');
   
-  // Restrict editor-only users to compose view only
-  if (isEditorOnly && view !== 'compose') {
+  // Restrict editor-only users to compose views only (email or SMS)
+  if (isEditorOnly && view !== 'compose' && view !== 'sms-compose') {
     console.log(`[ui-auth] Editor-only user attempted to access ${view}, redirecting to compose`);
     view = 'compose';
   }
@@ -3038,9 +3304,7 @@ function wireNav() {
 // Manage Tenants button (in compose context panel)
 document.getElementById('goToTenantsBtn')?.addEventListener('click', () => showView('tenants'));
 
-const originalUpdateEnvInfo = updateEnvInfo;
-// @ts-ignore
-updateEnvInfo = function() { originalUpdateEnvInfo(); (document.getElementById('viewTitle')!).textContent = composeHeaderTitle(); };
+// Note: Removed old title override to allow proper HTML structure with appTitle/viewFunction elements
 
 document.getElementById('quickSendForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -3254,11 +3518,13 @@ async function init() {
   }
   // Load tenants if superadmin or if auth is disabled (for SMTP config to work)
   if (roleList.includes('superadmin') || authDisabled) { await loadTenants(); }
-  // Load apps if we have a tenantId or if auth is disabled
-  if (tenantId) {
-    await loadApps(); // Load apps for specific tenant
-  } else if (authDisabled) {
-    await loadAllApps(); // Load all apps for SMTP config dropdowns
+  // Load apps if we have a tenantId or if auth is disabled - but skip for editor-only users
+  if (!isEditorOnly) {
+    if (tenantId) {
+      await loadApps(); // Load apps for specific tenant
+    } else if (authDisabled) {
+      await loadAllApps(); // Load all apps for SMTP config dropdowns
+    }
   }
   // If appId from token is present, prefer it for initial context
   if (state.user?.appId && (!appId || appId !== state.user.appId)) {
@@ -3275,8 +3541,12 @@ async function init() {
   }
   // wireNav() is already called in onAuthenticated() - no need to call again
   wireAppManagement();
-  setupSmtpConfig();
-  setupSmsConfig();
+  
+  // Skip admin-only configuration setup for editor-only users
+  if (!isEditorOnly) {
+    setupSmtpConfig();
+    setupSmsConfig();
+  }
   
   // Set up browser history handling
   setupHistoryHandling();
@@ -6064,6 +6334,7 @@ async function testGlobalSmsConfigById(configId: string) {
 (window as any).deleteGlobalConfigById = deleteGlobalConfigById;
 (window as any).switchToTenantContext = switchToTenantContext;
 (window as any).clearDraft = clearDraft;
+(window as any).returnToCallingAppFromCompose = returnToCallingAppFromCompose;
 
 // SMS functions
 (window as any).editSmsConfig = editSmsConfig;
@@ -7007,13 +7278,29 @@ async function sendComposedMessage() {
             tokenPreview: authToken ? authToken.substring(0, 20) + '...' : 'none'
         });
         
+        // Get content from TinyMCE before reading form data
+        const messageContent = TinyMCEManager.getContent('#messageContent');
+        
+        // Update the hidden field with TinyMCE content
+        const hiddenField = document.getElementById('messageContentHidden') as HTMLTextAreaElement;
+        if (hiddenField) {
+            hiddenField.value = messageContent;
+        }
+        
         const form = $('#composeForm') as HTMLFormElement;
         const formData = new FormData(form);
         
         const recipients = (formData.get('recipients') as string || '').trim();
         const subject = (formData.get('subject') as string || '').trim();
-        const messageContent = (formData.get('messageContent') as string || '').trim();
         const sendMode = ($('#sendMode') as HTMLSelectElement).value || 'individual';
+        
+        // Debug form values
+        console.log('[sendComposedMessage] Form values:', {
+            recipients: recipients.substring(0, 50) + '...',
+            subject,
+            messageContentLength: messageContent.length,
+            sendMode
+        });
         
         if (!recipients) {
             showStatusMessage($('#composeStatus') as HTMLElement, 'Please enter at least one recipient');
@@ -7025,7 +7312,7 @@ async function sendComposedMessage() {
             return;
         }
         
-        if (!messageContent) {
+        if (!messageContent || messageContent.trim() === '') {
             showStatusMessage($('#composeStatus') as HTMLElement, 'Please enter message content');
             return;
         }
@@ -7043,13 +7330,22 @@ async function sendComposedMessage() {
                 return match ? match[1] : line;
             });
         
+        // Get appId from URL parameters (for view-based system) or fallback to global state
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentAppId = urlParams.get('appId') || composeState.currentAppId;
+        
         console.log('[Compose] Processing message:', {
-            appId: composeState.currentAppId,
+            appId: currentAppId,
             subject,
             recipientCount: recipientEmails.length,
             sendMode,
             hasRecipientsData: composeState.recipientsData.length > 0
         });
+        
+        if (!currentAppId) {
+            showStatusMessage($('#composeStatus') as HTMLElement, 'Error: No app ID found. Please refresh and try again.');
+            return;
+        }
         
         // Check if we have recipient data for template variable substitution
         const hasRecipientsData = composeState.recipientsData.length > 0;
@@ -7102,7 +7398,7 @@ async function sendComposedMessage() {
         result = await api('/send-now', {
             method: 'POST',
             body: JSON.stringify({
-                appId: composeState.currentAppId,
+                appId: currentAppId,
                 subject: subject, // Raw template subject (may contain ${variable} placeholders)
                 html: messageContent, // Raw template HTML (may contain ${variable} placeholders)
                 recipients: recipientsData, // Recipients with full context data for template processing
@@ -7153,16 +7449,35 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
     
     alert(message);
     
-    // Get returnUrl from URL parameters and redirect back
+    // For editors, return to calling app after successful send
+    returnToCallingAppFromCompose();
+}
+
+// Return to calling application from compose view (for editors)
+function returnToCallingAppFromCompose() {
     const urlParams = new URLSearchParams(window.location.search);
-    const returnUrl = urlParams.get('returnUrl');
+    let returnUrl = urlParams.get('returnUrl');
+    
+    // If no returnUrl in current URL, try to get it from localStorage (for post-refresh scenarios)
+    if (!returnUrl) {
+        returnUrl = localStorage.getItem('editorReturnUrl');
+    }
     
     if (returnUrl) {
-        console.log('[Compose] Redirecting back to:', returnUrl);
+        console.log('[UI] Returning to calling app:', returnUrl);
+        // Clear the saved returnUrl after using it
+        localStorage.removeItem('editorReturnUrl');
         window.location.href = returnUrl;
     } else {
-        // Default redirect to apps view
-        window.location.hash = '#view=apps';
+        console.log('[UI] No returnUrl found, staying in mail service');
+        // For non-editor contexts or missing returnUrl, stay in the app
+        const roles: string[] = state.user?.roles || [];
+        const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+        
+        if (!isEditorOnly) {
+            // Default redirect to apps view for admins
+            showView('apps');
+        }
     }
 }
 

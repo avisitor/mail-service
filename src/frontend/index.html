@@ -10,7 +10,10 @@
 <body>
   <div id="app">
     <header>
-      <h1 id="viewTitle">Mail Service</h1>
+      <div id="viewTitle">
+        <h1 id="appTitle" style="margin: 0; font-size: 1.8em; line-height: 1.2;">Mail Service</h1>
+        <div id="viewFunction" style="font-size: 1em; color: #888; margin-top: 4px;"></div>
+      </div>
       <nav class="topnav">
         <button data-view="tenants" class="navBtn" id="tenantsNavBtn" style="display:none">Tenants</button>
         <button data-view="apps" class="navBtn" id="appsNavBtn" style="display:none">Apps</button>
@@ -158,6 +161,7 @@
             <div style="display: flex; gap: 10px; align-items: center;">
               <input type="submit" class="btn btn-primary" value="Send mail">
               <button type="button" class="btn btn-secondary" onclick="clearDraft()" title="Clear the current draft and saved state">Clear Draft</button>
+              <button type="button" id="cancelEmailBtn" class="btn btn-secondary" style="display: none;" onclick="returnToCallingAppFromCompose()">Cancel</button>
             </div>
           </div>
           
@@ -252,7 +256,7 @@
           <div class="form-group">
             <div style="display: flex; gap: 12px; margin-top: 20px;">
               <button type="submit" class="btn btn-primary">Send SMS</button>
-              <button type="button" id="cancelSmsBtn" class="btn btn-secondary">Cancel</button>
+              <button type="button" id="cancelSmsBtn" class="btn btn-secondary" style="display: none;" onclick="returnToCallingAppFromCompose()">Cancel</button>
             </div>
           </div>
           
