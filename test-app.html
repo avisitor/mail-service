@@ -220,6 +220,20 @@
             <button id="manage-apps-btn" onclick="manageApplications()">Manage Applications</button>
             <div id="manage-apps-result" class="result"></div>
         </div>
+
+        <div class="action-section">
+            <h3>4. View Email Logs (Tenant Admin)</h3>
+            <p>Redirect to mail-service email log viewer with IDP authentication for tenant admin to view email logs for the selected application.</p>
+            <button id="email-logs-btn" onclick="viewEmailLogs()">View Email Logs</button>
+            <div id="email-logs-result" class="result"></div>
+        </div>
+
+        <div class="action-section">
+            <h3>5. View SMS Logs (Tenant Admin)</h3>
+            <p>Redirect to mail-service SMS log viewer with IDP authentication for tenant admin to view SMS logs for the selected application.</p>
+            <button id="sms-logs-btn" onclick="viewSmsLogs()">View SMS Logs</button>
+            <div id="sms-logs-result" class="result"></div>
+        </div>
     </div>
 
     <script>
@@ -844,6 +858,62 @@
             }
         }
         
+        async function viewEmailLogs() {
+            const app = apps[currentApp];
+            hideResult('email-logs-result');
+            showLoading('email-logs-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('email-logs-result', 'AppId validated! Redirecting to email logs view...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const logsUrl = `/email-logs?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = logsUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('View email logs error:', error);
+                showResult('email-logs-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('email-logs-btn', 'View Email Logs');
+            }
+        }
+        
+        async function viewSmsLogs() {
+            const app = apps[currentApp];
+            hideResult('sms-logs-result');
+            showLoading('sms-logs-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Show success message and redirect
+                showResult('sms-logs-result', 'AppId validated! Redirecting to SMS logs view...', 'success');
+                
+                // Small delay to show the message, then redirect
+                setTimeout(() => {
+                    const smsLogsUrl = `/sms-logs?appId=${encodeURIComponent(app.appId)}&returnUrl=${encodeURIComponent(window.location.href)}`;
+                    window.location.href = smsLogsUrl;
+                }, 1500);
+                
+            } catch (error) {
+                console.error('View SMS logs error:', error);
+                showResult('sms-logs-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('sms-logs-btn', 'View SMS Logs');
+            }
+        }
+        
         // Handle return from mail-service with status
         window.addEventListener('load', function() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -862,6 +932,12 @@
                         break;
                     case 'admin':
                         resultElementId = 'manage-apps-result';
+                        break;
+                    case 'email-logs':
+                        resultElementId = 'email-logs-result';
+                        break;
+                    case 'sms-logs':
+                        resultElementId = 'sms-logs-result';
                         break;
                 }
                 

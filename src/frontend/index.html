@@ -11,17 +11,38 @@
   <div id="app">
     <header>
       <div id="viewTitle">
-        <h1 id="appTitle" style="margin: 0; font-size: 1.8em; line-height: 1.2;">Mail Service</h1>
-        <div id="viewFunction" style="font-size: 1em; color: #888; margin-top: 4px;"></div>
+        <h1 id="appTitle">Mail Service</h1>
+        <div id="viewFunction"></div>
       </div>
       <nav class="topnav">
-        <button data-view="tenants" class="navBtn" id="tenantsNavBtn" style="display:none">Tenants</button>
-        <button data-view="apps" class="navBtn" id="appsNavBtn" style="display:none">Apps</button>
-        <button data-view="compose" class="navBtn">Compose</button>
-        <button data-view="sms-compose" class="navBtn">Send SMS</button>
-        <button data-view="template-editor" class="navBtn" id="templateEditorNavBtn" style="display:none">Templates</button>
-        <button data-view="smtp-config" class="navBtn">SMTP Config</button>
-        <button data-view="sms-config" class="navBtn">SMS Config</button>
+        <!-- Admin Functions -->
+        <div class="nav-group">
+          <button data-view="tenants" class="navBtn" id="tenantsNavBtn">Tenants</button>
+          <button data-view="apps" class="navBtn" id="appsNavBtn">Apps</button>
+        </div>
+        
+        <!-- Primary Actions -->
+        <div class="nav-group">
+          <button data-view="compose" class="navBtn">Compose</button>
+          <button data-view="sms-compose" class="navBtn">Send SMS</button>
+        </div>
+        
+        <!-- Content Management -->
+        <div class="nav-group">
+          <button data-view="template-editor" class="navBtn" id="templateEditorNavBtn">Templates</button>
+        </div>
+        
+        <!-- Configuration -->
+        <div class="nav-group">
+          <button data-view="smtp-config" class="navBtn">Config</button>
+          <button data-view="sms-config" class="navBtn">SMS Config</button>
+        </div>
+        
+        <!-- Monitoring -->
+        <div class="nav-group">
+          <button data-view="email-logs" class="navBtn" id="emailLogsNavBtn">Email Logs</button>
+          <button data-view="sms-logs" class="navBtn" id="smsLogsNavBtn">SMS Logs</button>
+        </div>
       </nav>
       <div class="env" id="envInfo"></div>
       <div id="roleContext" style="background: #2a2a2a; padding: 8px; margin: 4px 0; border: 1px solid #555; border-radius: 4px; display: none;">
@@ -32,7 +53,7 @@
         </div>
       </div>
       <div class="userPane" id="userPane" style="display:none">
-        <span id="userSummary"></span>
+        <span id="userSummary" style="display:none"></span>
         <button id="logoutBtn" class="smallBtn" type="button" style="background: #dc3545; border: 1px solid #dc3545; color: white; margin-left: 10px;" title="Logout and clear session">🚪 Logout</button>
       </div>
     </header>
@@ -449,6 +470,93 @@
       </section>
     </main>
     
+    <!-- Email Logs View -->
+    <main class="layout" id="view-email-logs" style="display:none">
+      <section class="panel fullwidth">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2>📧 Email Logs</h2>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="emailLogSearch" placeholder="Search emails..." style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #2a2a2a; color: #fff;">
+            <select id="emailLogAppFilter" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #2a2a2a; color: #fff;">
+              <option value="">All Apps</option>
+            </select>
+            <button id="refreshEmailLogs" class="config-btn">Refresh</button>
+          </div>
+        </div>
+        
+        <div id="emailLogsPagination" style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+          <div id="emailLogsInfo" style="color: #999; font-size: 0.9rem;"></div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="emailLogsPrevBtn" class="config-btn config-btn-secondary" disabled>Previous</button>
+            <span id="emailLogsPageInfo" style="color: #999; font-size: 0.9rem;"></span>
+            <button id="emailLogsNextBtn" class="config-btn config-btn-secondary" disabled>Next</button>
+          </div>
+        </div>
+        
+        <div id="emailLogsContainer" style="background: #1a1a1a; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
+          <div id="emailLogsLoading" style="padding: 40px; text-align: center; color: #999;">
+            Loading email logs...
+          </div>
+          <div id="emailLogsTable" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333;">
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Date/Time</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Sender</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Recipients</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Subject</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Message Preview</div>
+            </div>
+            <div id="emailLogsRows"></div>
+          </div>
+          <div id="emailLogsEmpty" style="display: none; padding: 40px; text-align: center; color: #999;">
+            No email logs found
+          </div>
+        </div>
+      </section>
+    </main>
+    
+    <!-- SMS Logs View -->
+    <main class="layout" id="view-sms-logs" style="display:none">
+      <section class="panel fullwidth">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2>📱 SMS Logs</h2>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="smsLogSearch" placeholder="Search SMS..." style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #2a2a2a; color: #fff;">
+            <select id="smsLogAppFilter" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #2a2a2a; color: #fff;">
+              <option value="">All Apps</option>
+            </select>
+            <button id="refreshSmsLogs" class="config-btn">Refresh</button>
+          </div>
+        </div>
+        
+        <div id="smsLogsPagination" style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+          <div id="smsLogsInfo" style="color: #999; font-size: 0.9rem;"></div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="smsLogsPrevBtn" class="config-btn config-btn-secondary" disabled>Previous</button>
+            <span id="smsLogsPageInfo" style="color: #999; font-size: 0.9rem;"></span>
+            <button id="smsLogsNextBtn" class="config-btn config-btn-secondary" disabled>Next</button>
+          </div>
+        </div>
+        
+        <div id="smsLogsContainer" style="background: #1a1a1a; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
+          <div id="smsLogsLoading" style="padding: 40px; text-align: center; color: #999;">
+            Loading SMS logs...
+          </div>
+          <div id="smsLogsTable" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 1.5fr 2fr 4fr; gap: 1px; background: #333;">
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Date/Time</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Sender</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Recipients</div>
+              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Message Preview</div>
+            </div>
+            <div id="smsLogsRows"></div>
+          </div>
+          <div id="smsLogsEmpty" style="display: none; padding: 40px; text-align: center; color: #999;">
+            No SMS logs found
+          </div>
+        </div>
+      </section>
+    </main>
+    
     <!-- Global Configuration Modal -->
     <div id="globalConfigModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
       <div style="background: #1e1e1e; padding: 24px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5);">
@@ -734,6 +842,55 @@
           <button type="button" id="cancelAppSmsModalBtn" class="config-btn config-btn-secondary">Cancel</button>
         </div>
       </form>
+    </div>
+  </div>
+  
+  <!-- Log Message Modal -->
+  <div id="logMessageModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: #1e1e1e; padding: 24px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+        <h2 id="logMessageModalTitle" style="margin: 0; color: #81c784;">Message Details</h2>
+        <button id="closeLogMessageModal" style="background: transparent; border: none; color: #999; font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+      </div>
+      
+      <div id="logMessageContent" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <strong style="color: #81c784;">Message ID:</strong>
+            <div id="logModalMessageId" style="font-family: monospace; color: #fff; margin-top: 4px; word-break: break-all;"></div>
+          </div>
+          <div>
+            <strong style="color: #81c784;">Date/Time:</strong>
+            <div id="logModalDateTime" style="color: #fff; margin-top: 4px;"></div>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <strong style="color: #81c784;">Sender:</strong>
+            <div id="logModalSender" style="color: #fff; margin-top: 4px;"></div>
+          </div>
+          <div>
+            <strong style="color: #81c784;">Recipients:</strong>
+            <div id="logModalRecipients" style="color: #fff; margin-top: 4px; word-break: break-word;"></div>
+          </div>
+        </div>
+        
+        <div id="logModalSubjectContainer" style="display: none;">
+          <strong style="color: #81c784;">Subject:</strong>
+          <div id="logModalSubject" style="color: #fff; margin-top: 4px; word-break: break-word;"></div>
+        </div>
+        
+        <div id="logModalStatusContainer" style="display: none;">
+          <strong style="color: #81c784;">Status:</strong>
+          <div id="logModalStatus" style="margin-top: 4px;"></div>
+        </div>
+        
+        <div>
+          <strong style="color: #81c784;">Message:</strong>
+          <div id="logModalMessage" style="background: #2a2a2a; border: 1px solid #555; border-radius: 4px; padding: 16px; margin-top: 8px; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; color: #fff; font-family: 'Courier New', monospace; font-size: 0.9rem; line-height: 1.4;"></div>
+        </div>
+      </div>
     </div>
   </div>
   
