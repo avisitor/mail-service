@@ -89,6 +89,9 @@ class ViewRegistry {
         el.classList.toggle('active', el.getAttribute('data-view') === viewName)
       );
       
+      // Update logout/return button
+      updateLogoutButton();
+      
       // Update compose view titles if we're switching to a compose view
       if (viewName === 'compose' || viewName === 'sms-compose') {
         const urlParams = new URLSearchParams(window.location.search);
@@ -272,10 +275,10 @@ class ComposeView implements IView {
       updateViewTitle('compose', this.currentAppId || undefined);
     }
     
-    // Save returnUrl to localStorage for editor workflows
+    // Save returnUrl to localStorage for compose workflows from apps
     if (returnUrlFromUrl) {
       localStorage.setItem('editorReturnUrl', returnUrlFromUrl);
-      console.log('[ComposeView] Saved returnUrl for editor workflow:', returnUrlFromUrl);
+      console.log('[ComposeView] Saved returnUrl for compose workflow:', returnUrlFromUrl);
     }
     
     console.log('[ComposeView] URL params - appId:', appIdFromUrl, 'recipients:', recipientsFromUrl);
@@ -361,10 +364,10 @@ class ComposeView implements IView {
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('returnUrl');
     
-    // Show Cancel button for editors who have a return URL
+    // Show Cancel button when coming from an app (has returnUrl)
     const cancelBtn = document.getElementById('cancelEmailBtn') as HTMLElement;
     if (cancelBtn) {
-      cancelBtn.style.display = (isEditorOnly && returnUrl) ? 'inline-block' : 'none';
+      cancelBtn.style.display = returnUrl ? 'inline-block' : 'none';
     }
   }
 
@@ -1397,6 +1400,9 @@ class SmsComposeView implements IView {
           this.updateCharCount();
         }
       }
+      
+      // Update button visibility based on context
+      this.updateButtonVisibility();
     } else {
       // Check for saved state
       const savedPageState = localStorage.getItem('pageState');
@@ -1424,6 +1430,8 @@ class SmsComposeView implements IView {
         await this.restoreState({});
       } else {
         console.warn('[SmsComposeView] No appId found in URL or saved state');
+        // Still update button visibility even without appId
+        this.updateButtonVisibility();
       }
     }
   }
@@ -1434,10 +1442,10 @@ class SmsComposeView implements IView {
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('returnUrl');
     
-    // Show Cancel button for editors who have a return URL
+    // Show Cancel button when coming from an app (has returnUrl)
     const cancelBtn = document.getElementById('cancelSmsBtn') as HTMLElement;
     if (cancelBtn) {
-      cancelBtn.style.display = (isEditorOnly && returnUrl) ? 'inline-block' : 'none';
+      cancelBtn.style.display = returnUrl ? 'inline-block' : 'none';
     }
   }
 
@@ -1991,6 +1999,605 @@ class SmsConfigView implements IView {
 
   canAccess(userRoles: string[]): boolean {
     return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
+  }
+}
+
+class EmailLogsView implements IView {
+  readonly name = 'email-logs';
+  readonly elementId = 'view-email-logs';
+  private currentPage = 0;
+  private pageSize = 50;
+  private totalLogs = 0;
+  private currentAppFilter = '';
+  private currentSearch = '';
+
+  constructor() {
+    registerView(this);
+  }
+
+  async initialize(): Promise<void> {
+    console.log('[EmailLogsView] Initializing email logs view');
+    
+    // Set up event listeners
+    const refreshBtn = document.getElementById('refreshEmailLogs');
+    const searchInput = document.getElementById('emailLogSearch') as HTMLInputElement;
+    const appFilter = document.getElementById('emailLogAppFilter') as HTMLSelectElement;
+    const prevBtn = document.getElementById('emailLogsPrevBtn');
+    const nextBtn = document.getElementById('emailLogsNextBtn');
+    
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadLogs());
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        this.currentSearch = searchInput.value;
+        this.currentPage = 0;
+        this.loadLogs();
+      });
+    }
+    if (appFilter) {
+      appFilter.addEventListener('change', () => {
+        this.currentAppFilter = appFilter.value;
+        this.currentPage = 0;
+        this.loadLogs();
+      });
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => this.prevPage());
+    if (nextBtn) nextBtn.addEventListener('click', () => this.nextPage());
+  }
+
+  async activate(): Promise<void> {
+    console.log('[EmailLogsView] Activating email logs view');
+    
+    // Get app ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentAppId = urlParams.get('appId');
+    this.currentAppFilter = currentAppId || '';
+    
+    // Update title with app context
+    updateViewTitle('email-logs', currentAppId || undefined);
+    
+    // Load apps for filter
+    await this.loadAppsFilter();
+    
+    // Load logs
+    await this.loadLogs();
+  }
+
+  deactivate(): void {
+    console.log('[EmailLogsView] Deactivating email logs view');
+  }
+
+  saveState(): any {
+    return {
+      currentPage: this.currentPage,
+      currentAppFilter: this.currentAppFilter,
+      currentSearch: this.currentSearch
+    };
+  }
+
+  async restoreState(state: any): Promise<void> {
+    if (state) {
+      this.currentPage = state.currentPage || 0;
+      this.currentAppFilter = state.currentAppFilter || '';
+      this.currentSearch = state.currentSearch || '';
+      
+      const searchInput = document.getElementById('emailLogSearch') as HTMLInputElement;
+      const appFilter = document.getElementById('emailLogAppFilter') as HTMLSelectElement;
+      
+      if (searchInput) searchInput.value = this.currentSearch;
+      if (appFilter) appFilter.value = this.currentAppFilter;
+    }
+  }
+
+  canAccess(userRoles: string[]): boolean {
+    return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
+  }
+
+  private async loadAppsFilter(): Promise<void> {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentAppId = urlParams.get('appId');
+      
+      // If we have a specific appId from URL, hide the filter
+      const appFilterContainer = document.getElementById('emailLogAppFilter')?.parentElement;
+      if (currentAppId && appFilterContainer) {
+        appFilterContainer.style.display = 'none';
+        return;
+      }
+      
+      const token = authToken;
+      if (!token) return;
+
+      const response = await fetch('/apps', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const apps = await response.json();
+        const appFilter = document.getElementById('emailLogAppFilter') as HTMLSelectElement;
+        if (appFilter) {
+          appFilter.innerHTML = '<option value="">All Apps</option>';
+          apps.forEach((app: any) => {
+            const option = document.createElement('option');
+            option.value = app.id;
+            option.textContent = app.name;
+            appFilter.appendChild(option);
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error loading apps for filter:', error);
+    }
+  }
+
+  private async loadLogs(): Promise<void> {
+    const loadingEl = document.getElementById('emailLogsLoading');
+    const tableEl = document.getElementById('emailLogsTable');
+    const emptyEl = document.getElementById('emailLogsEmpty');
+    
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (tableEl) tableEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    try {
+      const token = authToken;
+      if (!token) return;
+
+      const params = new URLSearchParams({
+        limit: this.pageSize.toString(),
+        offset: (this.currentPage * this.pageSize).toString()
+      });
+
+      if (this.currentAppFilter) params.append('appId', this.currentAppFilter);
+      if (this.currentSearch) params.append('search', this.currentSearch);
+
+      const response = await fetch(`/api/logs/email?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.totalLogs = data.total;
+        this.renderLogs(data.logs);
+        this.updatePagination();
+      } else {
+        console.error('Failed to load email logs:', response.statusText);
+        this.showError('Failed to load email logs');
+      }
+    } catch (error) {
+      console.error('Error loading email logs:', error);
+      this.showError('Error loading email logs');
+    } finally {
+      if (loadingEl) loadingEl.style.display = 'none';
+    }
+  }
+
+  private renderLogs(logs: any[]): void {
+    const tableEl = document.getElementById('emailLogsTable');
+    const emptyEl = document.getElementById('emailLogsEmpty');
+    const rowsEl = document.getElementById('emailLogsRows');
+
+    if (!logs.length) {
+      if (tableEl) tableEl.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+      return;
+    }
+
+    if (tableEl) tableEl.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    if (rowsEl) {
+      rowsEl.innerHTML = logs.map(log => {
+        const dateTime = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
+        const sender = `${escapeHtml(log.senderName || 'Unknown')} <${escapeHtml(log.senderEmail || 'unknown@example.com')}>`;
+        const recipients = this.truncateText(formatRecipients(log.recipients || 'N/A'), 50);
+        const subject = this.truncateText(escapeHtml(log.subject || '(No subject)'), 40);
+        const messagePreview = this.truncateText(formatMessage(log.message || 'N/A'), 80);
+
+        return `
+          <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333;">
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${escapeHtml(dateTime)}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${sender}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${recipients}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${subject}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s;" 
+                 onclick="emailLogsView.showLogDetails('${log.id}')"
+                 onmouseover="this.style.backgroundColor='#2a2a2a'" 
+                 onmouseout="this.style.backgroundColor='#1a1a1a'">${messagePreview}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  private updatePagination(): void {
+    const infoEl = document.getElementById('emailLogsInfo');
+    const pageInfoEl = document.getElementById('emailLogsPageInfo');
+    const prevBtn = document.getElementById('emailLogsPrevBtn') as HTMLButtonElement;
+    const nextBtn = document.getElementById('emailLogsNextBtn') as HTMLButtonElement;
+
+    const start = this.currentPage * this.pageSize + 1;
+    const end = Math.min((this.currentPage + 1) * this.pageSize, this.totalLogs);
+
+    if (infoEl) {
+      infoEl.textContent = `Showing ${start}-${end} of ${this.totalLogs} email logs`;
+    }
+
+    if (pageInfoEl) {
+      const totalPages = Math.ceil(this.totalLogs / this.pageSize);
+      pageInfoEl.textContent = `Page ${this.currentPage + 1} of ${totalPages}`;
+    }
+
+    if (prevBtn) prevBtn.disabled = this.currentPage === 0;
+    if (nextBtn) nextBtn.disabled = (this.currentPage + 1) * this.pageSize >= this.totalLogs;
+  }
+
+  private prevPage(): void {
+    if (this.currentPage > 0) {
+      this.currentPage--;
+      this.loadLogs();
+    }
+  }
+
+  private nextPage(): void {
+    if ((this.currentPage + 1) * this.pageSize < this.totalLogs) {
+      this.currentPage++;
+      this.loadLogs();
+    }
+  }
+
+  private truncateText(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  }
+
+  private showError(message: string): void {
+    const container = document.getElementById('emailLogsContainer');
+    if (container) {
+      container.innerHTML = `<div style="padding: 40px; text-align: center; color: #f44336;">${message}</div>`;
+    }
+  }
+
+  async showLogDetails(logId: string): Promise<void> {
+    try {
+      const token = authToken;
+      if (!token) return;
+
+      const response = await fetch(`/api/logs/email/${logId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const log = await response.json();
+        this.showLogModal(log, 'email');
+      } else {
+        console.error('Failed to load email log details');
+      }
+    } catch (error) {
+      console.error('Error loading email log details:', error);
+    }
+  }
+
+  public showLogModal(log: any, type: 'email' | 'sms'): void {
+    const modal = document.getElementById('logMessageModal');
+    const titleEl = document.getElementById('logMessageModalTitle');
+    const messageIdEl = document.getElementById('logModalMessageId');
+    const dateTimeEl = document.getElementById('logModalDateTime');
+    const senderEl = document.getElementById('logModalSender');
+    const recipientsEl = document.getElementById('logModalRecipients');
+    const subjectContainer = document.getElementById('logModalSubjectContainer');
+    const subjectEl = document.getElementById('logModalSubject');
+    const statusContainer = document.getElementById('logModalStatusContainer');
+    const statusEl = document.getElementById('logModalStatus');
+    const messageEl = document.getElementById('logModalMessage');
+
+    if (titleEl) titleEl.textContent = type === 'email' ? 'Email Details' : 'SMS Details';
+    if (messageIdEl) messageIdEl.textContent = log.messageId || 'N/A';
+    if (dateTimeEl) dateTimeEl.textContent = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
+    if (recipientsEl) recipientsEl.innerHTML = formatRecipients(log.recipients || 'N/A');
+    
+    // For the modal, show the full message without truncation but still formatted
+    if (messageEl) {
+      const fullMessage = formatMessageForModal(log.message || 'N/A');
+      messageEl.innerHTML = fullMessage;
+    }
+
+    if (type === 'email') {
+      if (senderEl) senderEl.innerHTML = `${escapeHtml(log.senderName || 'Unknown')} &lt;${escapeHtml(log.senderEmail || 'unknown@example.com')}&gt;`;
+      if (subjectContainer) subjectContainer.style.display = 'block';
+      if (subjectEl) subjectEl.textContent = log.subject || '(No subject)';
+      if (statusContainer) statusContainer.style.display = 'none';
+    } else {
+      if (senderEl) senderEl.innerHTML = `${escapeHtml(log.senderName || 'Unknown')} (${escapeHtml(log.senderPhone || 'N/A')})`;
+      if (subjectContainer) subjectContainer.style.display = 'none';
+      if (statusContainer) statusContainer.style.display = 'block';
+      if (statusEl) {
+        let status = '';
+        if (log.delivered) status = '<span style="color: #4caf50;">✓ Delivered</span>';
+        else if (log.failed) status = `<span style="color: #f44336;">✗ Failed: ${escapeHtml(log.errorMessage || log.errorCode || 'Unknown error')}</span>`;
+        else status = '<span style="color: #ff9800;">⏳ Pending</span>';
+        statusEl.innerHTML = status;
+      }
+    }
+
+    if (modal) modal.style.display = 'flex';
+  }
+}
+
+class SmsLogsView implements IView {
+  readonly name = 'sms-logs';
+  readonly elementId = 'view-sms-logs';
+  private currentPage = 0;
+  private pageSize = 50;
+  private totalLogs = 0;
+  private currentAppFilter = '';
+  private currentSearch = '';
+
+  constructor() {
+    registerView(this);
+  }
+
+  async initialize(): Promise<void> {
+    console.log('[SmsLogsView] Initializing SMS logs view');
+    
+    // Set up event listeners
+    const refreshBtn = document.getElementById('refreshSmsLogs');
+    const searchInput = document.getElementById('smsLogSearch') as HTMLInputElement;
+    const appFilter = document.getElementById('smsLogAppFilter') as HTMLSelectElement;
+    const prevBtn = document.getElementById('smsLogsPrevBtn');
+    const nextBtn = document.getElementById('smsLogsNextBtn');
+    
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadLogs());
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        this.currentSearch = searchInput.value;
+        this.currentPage = 0;
+        this.loadLogs();
+      });
+    }
+    if (appFilter) {
+      appFilter.addEventListener('change', () => {
+        this.currentAppFilter = appFilter.value;
+        this.currentPage = 0;
+        this.loadLogs();
+      });
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => this.prevPage());
+    if (nextBtn) nextBtn.addEventListener('click', () => this.nextPage());
+  }
+
+  async activate(): Promise<void> {
+    console.log('[SmsLogsView] Activating SMS logs view');
+    
+    // Get app ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentAppId = urlParams.get('appId');
+    this.currentAppFilter = currentAppId || '';
+    
+    // Update title with app context
+    updateViewTitle('sms-logs', currentAppId || undefined);
+    
+    // Load apps for filter
+    await this.loadAppsFilter();
+    
+    // Load logs
+    await this.loadLogs();
+  }
+
+  deactivate(): void {
+    console.log('[SmsLogsView] Deactivating SMS logs view');
+  }
+
+  saveState(): any {
+    return {
+      currentPage: this.currentPage,
+      currentAppFilter: this.currentAppFilter,
+      currentSearch: this.currentSearch
+    };
+  }
+
+  async restoreState(state: any): Promise<void> {
+    if (state) {
+      this.currentPage = state.currentPage || 0;
+      this.currentAppFilter = state.currentAppFilter || '';
+      this.currentSearch = state.currentSearch || '';
+      
+      const searchInput = document.getElementById('smsLogSearch') as HTMLInputElement;
+      const appFilter = document.getElementById('smsLogAppFilter') as HTMLSelectElement;
+      
+      if (searchInput) searchInput.value = this.currentSearch;
+      if (appFilter) appFilter.value = this.currentAppFilter;
+    }
+  }
+
+  canAccess(userRoles: string[]): boolean {
+    return userRoles.includes('superadmin') || userRoles.includes('tenant_admin');
+  }
+
+  private async loadAppsFilter(): Promise<void> {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentAppId = urlParams.get('appId');
+      
+      // If we have a specific appId from URL, hide the filter
+      const appFilterContainer = document.getElementById('smsLogAppFilter')?.parentElement;
+      if (currentAppId && appFilterContainer) {
+        appFilterContainer.style.display = 'none';
+        return;
+      }
+      
+      const token = authToken;
+      if (!token) return;
+
+      const response = await fetch('/apps', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const apps = await response.json();
+        const appFilter = document.getElementById('smsLogAppFilter') as HTMLSelectElement;
+        if (appFilter) {
+          appFilter.innerHTML = '<option value="">All Apps</option>';
+          apps.forEach((app: any) => {
+            const option = document.createElement('option');
+            option.value = app.id;
+            option.textContent = app.name;
+            appFilter.appendChild(option);
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error loading apps for filter:', error);
+    }
+  }
+
+  private async loadLogs(): Promise<void> {
+    const loadingEl = document.getElementById('smsLogsLoading');
+    const tableEl = document.getElementById('smsLogsTable');
+    const emptyEl = document.getElementById('smsLogsEmpty');
+    
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (tableEl) tableEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    try {
+      const token = authToken;
+      if (!token) return;
+
+      const params = new URLSearchParams({
+        limit: this.pageSize.toString(),
+        offset: (this.currentPage * this.pageSize).toString()
+      });
+
+      if (this.currentAppFilter) params.append('appId', this.currentAppFilter);
+      if (this.currentSearch) params.append('search', this.currentSearch);
+
+      const response = await fetch(`/api/logs/sms?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.totalLogs = data.total;
+        this.renderLogs(data.logs);
+        this.updatePagination();
+      } else {
+        console.error('Failed to load SMS logs:', response.statusText);
+        this.showError('Failed to load SMS logs');
+      }
+    } catch (error) {
+      console.error('Error loading SMS logs:', error);
+      this.showError('Error loading SMS logs');
+    } finally {
+      if (loadingEl) loadingEl.style.display = 'none';
+    }
+  }
+
+  private renderLogs(logs: any[]): void {
+    const tableEl = document.getElementById('smsLogsTable');
+    const emptyEl = document.getElementById('smsLogsEmpty');
+    const rowsEl = document.getElementById('smsLogsRows');
+
+    if (!logs.length) {
+      if (tableEl) tableEl.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+      return;
+    }
+
+    if (tableEl) tableEl.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    if (rowsEl) {
+      rowsEl.innerHTML = logs.map(log => {
+        const dateTime = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
+        const sender = `${escapeHtml(log.senderName || 'Unknown')} (${escapeHtml(log.senderPhone || 'N/A')})`;
+        const recipients = this.truncateText(formatRecipients(log.recipients || 'N/A'), 50);
+        const messagePreview = this.truncateText(formatMessage(log.message || 'N/A'), 80);
+
+        return `
+          <div style="display: grid; grid-template-columns: 1fr 1.5fr 2fr 4fr; gap: 1px; background: #333;">
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${escapeHtml(dateTime)}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${sender}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${recipients}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s;" 
+                 onclick="smsLogsView.showLogDetails('${log.id}')"
+                 onmouseover="this.style.backgroundColor='#2a2a2a'" 
+                 onmouseout="this.style.backgroundColor='#1a1a1a'">${messagePreview}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  private updatePagination(): void {
+    const infoEl = document.getElementById('smsLogsInfo');
+    const pageInfoEl = document.getElementById('smsLogsPageInfo');
+    const prevBtn = document.getElementById('smsLogsPrevBtn') as HTMLButtonElement;
+    const nextBtn = document.getElementById('smsLogsNextBtn') as HTMLButtonElement;
+
+    const start = this.currentPage * this.pageSize + 1;
+    const end = Math.min((this.currentPage + 1) * this.pageSize, this.totalLogs);
+
+    if (infoEl) {
+      infoEl.textContent = `Showing ${start}-${end} of ${this.totalLogs} SMS logs`;
+    }
+
+    if (pageInfoEl) {
+      const totalPages = Math.ceil(this.totalLogs / this.pageSize);
+      pageInfoEl.textContent = `Page ${this.currentPage + 1} of ${totalPages}`;
+    }
+
+    if (prevBtn) prevBtn.disabled = this.currentPage === 0;
+    if (nextBtn) nextBtn.disabled = (this.currentPage + 1) * this.pageSize >= this.totalLogs;
+  }
+
+  private prevPage(): void {
+    if (this.currentPage > 0) {
+      this.currentPage--;
+      this.loadLogs();
+    }
+  }
+
+  private nextPage(): void {
+    if ((this.currentPage + 1) * this.pageSize < this.totalLogs) {
+      this.currentPage++;
+      this.loadLogs();
+    }
+  }
+
+  private truncateText(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  }
+
+  private showError(message: string): void {
+    const container = document.getElementById('smsLogsContainer');
+    if (container) {
+      container.innerHTML = `<div style="padding: 40px; text-align: center; color: #f44336;">${message}</div>`;
+    }
+  }
+
+  async showLogDetails(logId: string): Promise<void> {
+    try {
+      const token = authToken;
+      if (!token) return;
+
+      const response = await fetch(`/api/logs/sms/${logId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const log = await response.json();
+        // Find the emailLogsView instance to reuse its modal method
+        const emailLogsViewInstance = ViewRegistry.getInstance()['views'].get('email-logs') as EmailLogsView;
+        if (emailLogsViewInstance) {
+          emailLogsViewInstance.showLogModal(log, 'sms');
+        }
+      } else {
+        console.error('Failed to load SMS log details');
+      }
+    } catch (error) {
+      console.error('Error loading SMS log details:', error);
+    }
   }
 }
 
@@ -2558,14 +3165,8 @@ function onAuthenticated(cameFromIdp: boolean = false) {
   // Initialize role context
   updateRoleContext();
   
-  // Role based UI adjustments
+  // Load tenants for superadmin
   const isSuperadmin = roles.includes('superadmin');
-  const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
-  // Hide Tenants nav for anyone who is not superadmin
-  if (!isSuperadmin) {
-    document.querySelectorAll('[data-view=tenants]').forEach(el=> (el as HTMLElement).style.display='none');
-    document.getElementById('goToTenantsBtn')?.remove();
-  }
   const loadTenantsPromise = isSuperadmin ? loadTenants().catch(()=>{}) : Promise.resolve();
   loadTenantsPromise.then(async () => {
     // For superadmin, only load tenantId from localStorage if they specifically chose a tenant context
@@ -2619,6 +3220,21 @@ function onAuthenticated(cameFromIdp: boolean = false) {
     }
     
     await initializeViews();
+    
+    // Set up log message modal close handler
+    const closeLogMessageModal = document.getElementById('closeLogMessageModal');
+    const logMessageModal = document.getElementById('logMessageModal');
+    if (closeLogMessageModal && logMessageModal) {
+      closeLogMessageModal.addEventListener('click', () => {
+        logMessageModal.style.display = 'none';
+      });
+      logMessageModal.addEventListener('click', (e) => {
+        if (e.target === logMessageModal) {
+          logMessageModal.style.display = 'none';
+        }
+      });
+    }
+    
     wireNav();
     wireAppManagement();
   });
@@ -2654,6 +3270,7 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   try {
     state.user = await api('/me');
     if (!state.user) throw new Error('No user context');
+    
     statusEl.textContent = 'OK';
     setTimeout(()=> { statusEl.textContent=''; }, 800);
     onAuthenticated(false); // Manual login form - not from IDP
@@ -2663,7 +3280,48 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   }
 });
 
+function updateLogoutButton() {
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (!logoutBtn) return;
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
+  const currentView = urlParams.get('view');
+  
+  // Show Return button if:
+  // 1. External log viewing (returnUrl + view=email-logs/sms-logs)
+  // 2. Coming from app (returnUrl exists, indicating app integration)
+  const isExternalLogViewing = returnUrl && (currentView === 'email-logs' || currentView === 'sms-logs');
+  const isFromApp = returnUrl && !isExternalLogViewing; // Coming from app for compose/other views
+  
+  if (isExternalLogViewing || isFromApp) {
+    // Show as "Return" button
+    logoutBtn.innerHTML = '↩️ Return';
+    logoutBtn.title = 'Return to calling application';
+    logoutBtn.style.background = '#28a745';
+    logoutBtn.style.borderColor = '#28a745';
+  } else {
+    // Show as "Logout" button for normal mail service usage
+    logoutBtn.innerHTML = '🚪 Logout';
+    logoutBtn.title = 'Logout and clear session';
+    logoutBtn.style.background = '#dc3545';
+    logoutBtn.style.borderColor = '#dc3545';
+  }
+}
+
 document.getElementById('logoutBtn')?.addEventListener('click', () => {
+  // Check if we have a return URL - if so, this should be "Return" instead of "Logout"
+  const urlParams = new URLSearchParams(window.location.search);
+  const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
+  
+  if (returnUrl) {
+    // This is a return to the calling app
+    console.log('🔄 Returning to calling app:', returnUrl);
+    localStorage.removeItem('editorReturnUrl'); // Clean up
+    window.location.href = returnUrl;
+    return;
+  }
+  
   // Confirm logout action
   if (!confirm('Are you sure you want to logout? This will clear your session and return you to the login screen.')) {
     return;
@@ -2811,6 +3469,12 @@ function getViewTitle(viewName: string, currentAppId?: string): { appTitle: stri
     case 'sms-config':
       viewFunction = 'SMS Configuration';
       break;
+    case 'email-logs':
+      viewFunction = 'Email Logs';
+      break;
+    case 'sms-logs':
+      viewFunction = 'SMS Logs';
+      break;
     case 'template-editor':
       viewFunction = 'Template Editor';
       break;
@@ -2818,11 +3482,15 @@ function getViewTitle(viewName: string, currentAppId?: string): { appTitle: stri
       viewFunction = 'Mail Service';
   }
   
-  // For editors and app-specific contexts, show app name prominently
-  if (appLabel && (viewName === 'compose' || viewName === 'sms-compose')) {
+  // For app-specific contexts (compose, logs, etc.), show app name prominently
+  if (appLabel && (viewName === 'compose' || viewName === 'sms-compose' || viewName === 'email-logs' || viewName === 'sms-logs')) {
+    // Set document title to include both app and function
+    document.title = `${appLabel} - ${viewFunction}`;
     return { appTitle: appLabel, viewFunction: viewFunction };
   }
   
+  // For non-app specific views, show function as title
+  document.title = `Mail Service - ${viewFunction}`;
   return { appTitle: viewFunction, viewFunction: '' };
 }
 
@@ -2972,6 +3640,141 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+function formatRecipients(recipientsStr: string): string {
+  if (!recipientsStr || recipientsStr === 'N/A') return 'N/A';
+  
+  try {
+    const recipients = JSON.parse(recipientsStr);
+    if (Array.isArray(recipients)) {
+      return recipients.map((recipient: any) => {
+        if (typeof recipient === 'string') {
+          return escapeHtml(recipient);
+        } else if (recipient && typeof recipient === 'object') {
+          if (recipient.name && recipient.email) {
+            return `${escapeHtml(recipient.name)} <${escapeHtml(recipient.email)}>`;
+          } else if (recipient.email) {
+            return escapeHtml(recipient.email);
+          } else if (recipient.phone) {
+            return escapeHtml(recipient.phone);
+          }
+        }
+        return escapeHtml(String(recipient));
+      }).join(', ');
+    }
+  } catch (e) {
+    // If it's not valid JSON, treat as plain text
+  }
+  
+  return escapeHtml(recipientsStr);
+}
+
+function formatMessage(messageStr: string): string {
+  if (!messageStr || messageStr === 'N/A') return 'N/A';
+  
+  // First try to parse as JSON
+  try {
+    if (messageStr.trim().startsWith('{') || messageStr.trim().startsWith('[')) {
+      const parsed = JSON.parse(messageStr);
+      if (typeof parsed === 'object') {
+        // If it's an object, try to extract meaningful text
+        if (parsed.text) return escapeHtml(stripHtml(parsed.text));
+        if (parsed.content) return escapeHtml(stripHtml(parsed.content));
+        if (parsed.body) return escapeHtml(stripHtml(parsed.body));
+        if (parsed.message) return escapeHtml(stripHtml(parsed.message));
+        if (parsed.html) return escapeHtml(stripHtml(parsed.html));
+        if (parsed.subject) return escapeHtml(stripHtml(parsed.subject));
+        
+        // If it's an array, try to join meaningful parts
+        if (Array.isArray(parsed)) {
+          const textParts = parsed.map(item => {
+            if (typeof item === 'string') return stripHtml(item);
+            if (item && typeof item === 'object') {
+              return item.text || item.content || item.message || JSON.stringify(item);
+            }
+            return String(item);
+          }).filter(Boolean);
+          
+          if (textParts.length > 0) {
+            return escapeHtml(textParts.join(', '));
+          }
+        }
+        
+        // Last resort: show it's JSON data
+        return '[JSON Data]';
+      }
+    }
+  } catch (e) {
+    // Not valid JSON, continue with regular processing
+  }
+  
+  // For non-JSON content, strip HTML tags to get plain text
+  return escapeHtml(stripHtml(messageStr));
+}
+
+function stripHtml(html: string): string {
+  if (!html) return '';
+  
+  // Create a temporary div element to parse HTML
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  
+  // Extract text content and clean up whitespace
+  return temp.textContent || temp.innerText || '';
+}
+
+function formatMessageForModal(messageStr: string): string {
+  if (!messageStr || messageStr === 'N/A') return 'N/A';
+  
+  try {
+    // Check if it looks like JSON
+    if (messageStr.trim().startsWith('{') || messageStr.trim().startsWith('[')) {
+      const parsed = JSON.parse(messageStr);
+      if (typeof parsed === 'object') {
+        // If it's an object, try to extract meaningful content
+        if (parsed.html) {
+          // For HTML content in modal, show it rendered (but sanitized)
+          return sanitizeHtml(parsed.html);
+        }
+        if (parsed.text) return escapeHtml(parsed.text);
+        if (parsed.content) return escapeHtml(parsed.content);
+        if (parsed.body) return escapeHtml(parsed.body);
+        if (parsed.message) return escapeHtml(parsed.message);
+        
+        // If no obvious content field, return formatted JSON
+        return `<pre style="white-space: pre-wrap; word-wrap: break-word; background: #2a2a2a; padding: 10px; border-radius: 4px; font-size: 0.9em;">${escapeHtml(JSON.stringify(parsed, null, 2))}</pre>`;
+      }
+    }
+  } catch (e) {
+    // If it's not valid JSON, treat as content
+  }
+  
+  // For modal, if it looks like HTML, render it (but sanitized)
+  if (messageStr.includes('<') && messageStr.includes('>')) {
+    return sanitizeHtml(messageStr);
+  }
+  
+  return escapeHtml(messageStr);
+}
+
+function sanitizeHtml(html: string): string {
+  // Create a temporary div to parse HTML
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  
+  // Remove dangerous elements and attributes
+  const scripts = temp.querySelectorAll('script');
+  scripts.forEach(script => script.remove());
+  
+  const dangerous = temp.querySelectorAll('[onclick], [onload], [onerror]');
+  dangerous.forEach(elem => {
+    elem.removeAttribute('onclick');
+    elem.removeAttribute('onload');
+    elem.removeAttribute('onerror');
+  });
+  
+  return temp.innerHTML;
+}
+
 async function editApp(appId: string) {
   const app = state.apps.find(a => a.id === appId);
   if (!app) return;
@@ -3036,80 +3839,145 @@ function updateRoleContext() {
   }
   
   // Update navigation visibility based on role and context
-  updateNavigationVisibility();
+  setRoleBasedVisibility();
 }
 
-function updateNavigationVisibility() {
+
+
+// Role-based UI element visibility configuration
+const ROLE_CAPABILITIES: Record<string, string[]> = {
+  superadmin: [
+    'tenantsBtn',
+    'appsBtn', 
+    'templateEditorBtn',
+    'emailLogsBtn',
+    'smsLogsBtn',
+    'smtpConfigBtn',
+    'smsConfigBtn',
+    'composeNavBtn',
+    'smsComposeNavBtn',
+    'goToTenantsBtn',
+    'envInfo',
+    'roleContext',
+    'userPane'
+    // Note: topnav removed - always visible, just buttons inside are controlled
+  ],
+  tenant_admin: [
+    'appsBtn',
+    'templateEditorBtn', 
+    'emailLogsBtn',
+    'smsLogsBtn',
+    'smtpConfigBtn',
+    'smsConfigBtn',
+    'composeNavBtn',
+    'smsComposeNavBtn',
+    'envInfo',
+    'roleContext',
+    'userPane'
+    // Note: tenantsBtn and goToTenantsBtn explicitly NOT included
+  ],
+  editor: [
+    'userPane'
+    // Very minimal - just enough to function
+  ]
+};
+
+function setRoleBasedVisibility() {
   const roles: string[] = state.user?.roles || [];
-  const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+  const isSuperadmin = roles.includes('superadmin');
+  const isTenantAdmin = roles.includes('tenant_admin');
+  const isEditor = roles.includes('editor');
   
-  const appsNavBtn = document.querySelector('[data-view="apps"]') as HTMLElement;
-  const tenantsNavBtn = document.querySelector('[data-view="tenants"]') as HTMLElement;
-  const templateEditorNavBtn = document.querySelector('[data-view="template-editor"]') as HTMLElement;
-  const smtpConfigBtn = document.querySelector('[data-view="smtp-config"]') as HTMLElement;
-  const smsConfigBtn = document.querySelector('[data-view="sms-config"]') as HTMLElement;
-  const composeNavBtn = document.querySelector('[data-view="compose"]') as HTMLElement;
-  const smsComposeNavBtn = document.querySelector('[data-view="sms-compose"]') as HTMLElement;
+  // Determine primary role (highest privilege wins)
+  let currentRole = 'unknown';
+  if (isSuperadmin) currentRole = 'superadmin';
+  else if (isTenantAdmin) currentRole = 'tenant_admin';
+  else if (isEditor) currentRole = 'editor';
   
-  if (appsNavBtn) {
-    // Apps button visible for tenant_admin and superadmin (in any context)
-    appsNavBtn.style.display = (roles.includes('tenant_admin') || roles.includes('superadmin')) ? 'block' : 'none';
-  }
+  // Get allowed capabilities for this role
+  const allowedCapabilities = ROLE_CAPABILITIES[currentRole] || [];
   
-  if (tenantsNavBtn) {
-    // Tenants button only visible for superadmin outside tenant context
-    tenantsNavBtn.style.display = (roles.includes('superadmin') && !roleContext.isInTenantContext) ? 'block' : 'none';
-  }
+  // Define all UI elements that can be controlled
+  const allUIElements: Record<string, HTMLElement | null> = {
+    tenantsBtn: document.querySelector('.navBtn[data-view="tenants"]'),
+    appsBtn: document.querySelector('.navBtn[data-view="apps"]'),
+    templateEditorBtn: document.getElementById('templateEditorNavBtn'),
+    emailLogsBtn: document.getElementById('emailLogsNavBtn'),
+    smsLogsBtn: document.getElementById('smsLogsNavBtn'),
+    smtpConfigBtn: document.querySelector('[data-view="smtp-config"]'),
+    smsConfigBtn: document.querySelector('[data-view="sms-config"]'),
+    composeNavBtn: document.querySelector('[data-view="compose"]'),
+    smsComposeNavBtn: document.querySelector('[data-view="sms-compose"]'),
+    goToTenantsBtn: document.getElementById('goToTenantsBtn'),
+    envInfo: document.getElementById('envInfo'),
+    roleContext: document.getElementById('roleContext'),
+    userPane: document.getElementById('userPane')
+    // Note: topnav removed - always visible, just buttons inside are controlled
+  };
   
-  if (templateEditorNavBtn) {
-    // Template Editor button visible for tenant_admin and superadmin (in any context)
-    templateEditorNavBtn.style.display = (roles.includes('tenant_admin') || roles.includes('superadmin')) ? 'block' : 'none';
-  }
-  
-  if (smtpConfigBtn) {
-    // SMTP Config button hidden for editor-only users
-    smtpConfigBtn.style.display = isEditorOnly ? 'none' : 'block';
-    // Update button text for non-editor users
-    if (!isEditorOnly) {
-      smtpConfigBtn.textContent = 'Config';
+  // Apply visibility: show only what's explicitly allowed for this role
+  Object.entries(allUIElements).forEach(([elementName, element]) => {
+    if (!element) return; // Element doesn't exist in DOM
+    
+    const isAllowed = allowedCapabilities.includes(elementName);
+    
+    if (isAllowed) {
+      // Show element (use appropriate display style with !important to override CSS)
+      if (elementName.includes('Btn') || elementName.includes('Nav')) {
+        const displayValue = elementName === 'topnav' ? 'flex' : 
+                            elementName === 'userPane' ? 'flex' :
+                            elementName.includes('Config') ? 'block' : 'inline-block';
+        element.style.setProperty('display', displayValue, 'important');
+      } else {
+        const displayValue = elementName === 'userPane' ? 'flex' : 'block';
+        element.style.setProperty('display', displayValue, 'important');
+      }
+    } else {
+      // Hide or remove element
+      if (elementName === 'goToTenantsBtn' || elementName === 'tenantsBtn') {
+        // Remove these completely from DOM for non-superadmins
+        element.remove();
+      } else {
+        element.style.setProperty('display', 'none', 'important');
+      }
     }
-  }
-
-  if (smsConfigBtn) {
-    // SMS Config button hidden for editor-only users
-    smsConfigBtn.style.display = isEditorOnly ? 'none' : 'block';
-  }
-
-  // For editor-only users, hide ALL navigation buttons and admin UI elements
-  if (isEditorOnly) {
-    if (composeNavBtn) composeNavBtn.style.display = 'none';
-    if (smsComposeNavBtn) smsComposeNavBtn.style.display = 'none';
-    
-    // Hide admin UI elements for editors
-    const envInfo = document.getElementById('envInfo');
-    const roleContext = document.getElementById('roleContext');
-    const userPane = document.getElementById('userPane');
+  });
+  
+  // Handle app integration contexts - override normal visibility
+  const urlParams = new URLSearchParams(window.location.search);
+  const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
+  const currentView = urlParams.get('view');
+  
+  // External log viewing: hide most UI except userPane for return button  
+  const isExternalLogViewing = returnUrl && (currentView === 'email-logs' || currentView === 'sms-logs');
+  
+  // App integration compose: hide navigation when coming from app for compose
+  const isAppIntegratedCompose = returnUrl && !isExternalLogViewing;
+  
+  if (isExternalLogViewing) {
+    // For external log viewing, hide most UI except userPane for return button
+    ['envInfo', 'roleContext', 'composeNavBtn', 'smsComposeNavBtn'].forEach(elementName => {
+      const element = allUIElements[elementName];
+      if (element) element.style.setProperty('display', 'none', 'important');
+    });
+    // Hide the entire topnav for external navigation
     const topnav = document.querySelector('.topnav') as HTMLElement;
+    if (topnav) topnav.style.setProperty('display', 'none', 'important');
     
-    if (envInfo) envInfo.style.display = 'none';
-    if (roleContext) roleContext.style.display = 'none';
-    if (userPane) userPane.style.display = 'none';
-    if (topnav) topnav.style.display = 'none';
-  } else {
-    // For non-editors, show the compose navigation buttons and admin UI
-    if (composeNavBtn) composeNavBtn.style.display = 'block';
-    if (smsComposeNavBtn) smsComposeNavBtn.style.display = 'block';
+    // Keep userPane visible for return functionality
+    if (allUIElements.userPane) allUIElements.userPane.style.setProperty('display', 'flex', 'important');
     
-    // Show admin UI elements for non-editors
-    const envInfo = document.getElementById('envInfo');
-    const roleContext = document.getElementById('roleContext');
-    const userPane = document.getElementById('userPane');
+  } else if (isAppIntegratedCompose) {
+    // For compose views from apps, hide navigation and header return button
+    ['envInfo', 'roleContext', 'userPane'].forEach(elementName => {
+      const element = allUIElements[elementName];
+      if (element) element.style.setProperty('display', 'none', 'important');
+    });
+    // Hide the entire topnav for app-integrated compose
     const topnav = document.querySelector('.topnav') as HTMLElement;
+    if (topnav) topnav.style.setProperty('display', 'none', 'important');
     
-    if (envInfo) envInfo.style.display = 'block';
-    if (userPane) userPane.style.display = 'flex';
-    if (topnav) topnav.style.display = 'block';
-    // roleContext display is handled by updateRoleContext function
+    // The compose forms will handle their own Cancel buttons for returning to apps
   }
 }
 
@@ -3259,6 +4127,12 @@ async function initializeViews(): Promise<void> {
   const tenantsView = new TenantsView();
   const smtpConfigView = new SmtpConfigView();
   const smsConfigView = new SmsConfigView();
+  const emailLogsView = new EmailLogsView();
+  const smsLogsView = new SmsLogsView();
+  
+  // Make log views globally accessible for onclick handlers
+  (window as any).emailLogsView = emailLogsView;
+  (window as any).smsLogsView = smsLogsView;
   
   // Initialize all views
   await composeView.initialize();
@@ -3268,8 +4142,13 @@ async function initializeViews(): Promise<void> {
   await tenantsView.initialize();
   await smtpConfigView.initialize();
   await smsConfigView.initialize();
+  await emailLogsView.initialize();
+  await smsLogsView.initialize();
   
   console.log('[ViewRegistry] Views initialized and registered');
+  
+  // Ensure navigation visibility is correct after all views are initialized
+  setRoleBasedVisibility();
 }
 
 function wireNav() {
@@ -3393,6 +4272,7 @@ async function init() {
     console.debug('[ui-auth] Calling /me with token:', authToken ? `${authToken.substring(0, 20)}...` : 'none');
     state.user = await api('/me'); 
     console.debug('[ui-auth] /me response:', state.user ? 'user found' : 'null response');
+    
     // If /me returns null but succeeds, auth is disabled
     if (state.user === null) {
       authDisabled = true;
@@ -3502,20 +4382,19 @@ async function init() {
     onAuthenticated(false); // Pre-existing session - restore state
   }
 
-  // Role based UI adjustments
+  // Role based UI adjustments for editor-only users
   const roleList: string[] = state.user?.roles || [];
   const isEditorOnly = roleList.includes('editor') && !roleList.some(r=> r==='tenant_admin' || r==='superadmin');
-  const isTenantAdmin = roleList.includes('tenant_admin') && !roleList.includes('superadmin');
-  if (isEditorOnly) {
-    // Hide Tenants navigation button entirely
-    document.querySelectorAll('[data-view=tenants]').forEach(el=> (el as HTMLElement).style.display='none');
-  }
+  
   if (isEditorOnly) {
     // Hide tenant creation & app creation panels if present (compose context should only allow selecting existing)
     const tenantPanel = document.getElementById('tenantAppPanel');
     // editors should not see Manage Tenants button
     document.getElementById('goToTenantsBtn')?.remove();
   }
+  
+  // Update navigation visibility based on roles
+  setRoleBasedVisibility();
   // Load tenants if superadmin or if auth is disabled (for SMTP config to work)
   if (roleList.includes('superadmin') || authDisabled) { await loadTenants(); }
   // Load apps if we have a tenantId or if auth is disabled - but skip for editor-only users
