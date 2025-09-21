@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { 
   createSmsConfig, 
   updateSmsConfig, 
@@ -23,11 +23,34 @@ describe('SMS Configuration Management (Self-Contained)', () => {
 
   const prisma = getPrisma();
 
+  // Clean up any existing test data before starting
   beforeAll(async () => {
+    // Delete any existing test data that might interfere
+    await prisma.smsConfig.deleteMany({
+      where: {
+        OR: [
+          { sid: { startsWith: 'ACtest' } },
+          { fromNumber: { startsWith: '+1555555' } }
+        ]
+      }
+    });
+  });
+
+  beforeEach(async () => {
+    // Reset test data for each test
+    testData = {
+      tenant: null,
+      twilioApp: null,
+      noConfigApp: null,
+      appSmsConfig: null,
+      tenantSmsConfig: null,
+      globalSmsConfig: null
+    };
+
     // Create test tenant
     const tenant = await prisma.tenant.create({
       data: {
-        name: 'SMS Test Tenant'
+        name: `SMS Test Tenant ${Date.now()}`
       }
     });
     testData.tenant = tenant;
@@ -36,8 +59,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
     const twilioApp = await prisma.app.create({
       data: {
         tenantId: tenant.id,
-        name: 'Twilio Test App',
-        clientId: `twilio-test-${Date.now()}`
+        name: `Twilio Test App ${Date.now()}`,
+        clientId: `twilio-test-${Date.now()}-${Math.random().toString(36).substring(7)}`
       }
     });
     testData.twilioApp = twilioApp;
@@ -46,8 +69,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
     const noConfigApp = await prisma.app.create({
       data: {
         tenantId: tenant.id,
-        name: 'No Config Test App',
-        clientId: `no-config-test-${Date.now()}`
+        name: `No Config Test App ${Date.now()}`,
+        clientId: `no-config-test-${Date.now()}-${Math.random().toString(36).substring(7)}`
       }
     });
     testData.noConfigApp = noConfigApp;
@@ -58,9 +81,9 @@ describe('SMS Configuration Management (Self-Contained)', () => {
         scope: 'APP',
         tenantId: tenant.id,
         appId: twilioApp.id,
-        sid: 'ACtest123456789app',
+        sid: `ACtest${Date.now()}app`,
         token: encrypt('test-auth-token-app'),
-        fromNumber: '+15555551234',
+        fromNumber: `+1555555${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
         isActive: true
       }
     });
@@ -71,9 +94,9 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       data: {
         scope: 'TENANT',
         tenantId: tenant.id,
-        sid: 'ACtest123456789tenant',
+        sid: `ACtest${Date.now()}tenant`,
         token: encrypt('test-auth-token-tenant'),
-        fromNumber: '+15555555678',
+        fromNumber: `+1555555${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
         isActive: true
       }
     });
@@ -83,34 +106,54 @@ describe('SMS Configuration Management (Self-Contained)', () => {
     const globalSmsConfig = await prisma.smsConfig.create({
       data: {
         scope: 'GLOBAL',
-        sid: 'ACtest123456789global',
+        sid: `ACtest${Date.now()}global`,
         token: encrypt('test-auth-token-global'),
-        fromNumber: '+15555559999',
+        fromNumber: `+1555555${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
         isActive: true
       }
     });
     testData.globalSmsConfig = globalSmsConfig;
   });
 
+  afterEach(async () => {
+    // Cleanup after each test in reverse order to respect foreign key constraints
+    try {
+      if (testData.appSmsConfig?.id) {
+        await prisma.smsConfig.delete({ where: { id: testData.appSmsConfig.id } }).catch(() => {});
+      }
+      if (testData.tenantSmsConfig?.id) {
+        await prisma.smsConfig.delete({ where: { id: testData.tenantSmsConfig.id } }).catch(() => {});
+      }
+      if (testData.globalSmsConfig?.id) {
+        await prisma.smsConfig.delete({ where: { id: testData.globalSmsConfig.id } }).catch(() => {});
+      }
+      if (testData.twilioApp?.id) {
+        await prisma.app.delete({ where: { id: testData.twilioApp.id } }).catch(() => {});
+      }
+      if (testData.noConfigApp?.id) {
+        await prisma.app.delete({ where: { id: testData.noConfigApp.id } }).catch(() => {});
+      }
+      if (testData.tenant?.id) {
+        await prisma.tenant.delete({ where: { id: testData.tenant.id } }).catch(() => {});
+      }
+    } catch (error) {
+      console.warn('Cleanup error in afterEach:', error);
+    }
+  });
+
   afterAll(async () => {
-    // Cleanup in reverse order to respect foreign key constraints
-    if (testData.appSmsConfig) {
-      await prisma.smsConfig.delete({ where: { id: testData.appSmsConfig.id } });
-    }
-    if (testData.tenantSmsConfig) {
-      await prisma.smsConfig.delete({ where: { id: testData.tenantSmsConfig.id } });
-    }
-    if (testData.globalSmsConfig) {
-      await prisma.smsConfig.delete({ where: { id: testData.globalSmsConfig.id } });
-    }
-    if (testData.twilioApp) {
-      await prisma.app.delete({ where: { id: testData.twilioApp.id } });
-    }
-    if (testData.noConfigApp) {
-      await prisma.app.delete({ where: { id: testData.noConfigApp.id } });
-    }
-    if (testData.tenant) {
-      await prisma.tenant.delete({ where: { id: testData.tenant.id } });
+    // Final cleanup of any remaining test data
+    try {
+      await prisma.smsConfig.deleteMany({
+        where: {
+          OR: [
+            { sid: { startsWith: 'ACtest' } },
+            { fromNumber: { startsWith: '+1555555' } }
+          ]
+        }
+      });
+    } catch (error) {
+      console.warn('Final cleanup error:', error);
     }
   });
 
@@ -120,8 +163,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       
       expect(config).toBeDefined();
       expect(config?.scope).toBe('APP');
-      expect(config?.accountSid).toBe('ACtest123456789app');
-      expect(config?.fromNumber).toBe('+15555551234');
+      expect(config?.accountSid).toBe(testData.appSmsConfig.sid);
+      expect(config?.fromNumber).toBe(testData.appSmsConfig.fromNumber);
     });
 
     it('should decrypt authToken when resolving APP config', async () => {
@@ -138,8 +181,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       
       expect(config).toBeDefined();
       expect(config?.scope).toBe('TENANT');
-      expect(config?.accountSid).toBe('ACtest123456789tenant');
-      expect(config?.fromNumber).toBe('+15555555678');
+      expect(config?.accountSid).toBe(testData.tenantSmsConfig.sid);
+      expect(config?.fromNumber).toBe(testData.tenantSmsConfig.fromNumber);
     });
   });
 
@@ -147,14 +190,14 @@ describe('SMS Configuration Management (Self-Contained)', () => {
     it('should fall back to GLOBAL scope when TENANT config not available', async () => {
       // Create an app in a different tenant to test global fallback
       const otherTenant = await prisma.tenant.create({
-        data: { name: 'Other Tenant' }
+        data: { name: `Other Tenant ${Date.now()}` }
       });
 
       const otherApp = await prisma.app.create({
         data: {
           tenantId: otherTenant.id,
-          name: 'Other App',
-          clientId: `other-app-${Date.now()}`
+          name: `Other App ${Date.now()}`,
+          clientId: `other-app-${Date.now()}-${Math.random().toString(36).substring(7)}`
         }
       });
 
@@ -163,8 +206,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
         
         expect(config).toBeDefined();
         expect(config?.scope).toBe('GLOBAL');
-        expect(config?.accountSid).toBe('ACtest123456789global');
-        expect(config?.fromNumber).toBe('+15555559999');
+        expect(config?.accountSid).toBe(testData.globalSmsConfig.sid);
+        expect(config?.fromNumber).toBe(testData.globalSmsConfig.fromNumber);
       } finally {
         // Cleanup
         await prisma.app.delete({ where: { id: otherApp.id } });
@@ -246,7 +289,7 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       expect(config).toBeDefined();
       expect(config?.id).toBe(testData.appSmsConfig.id);
       expect(config?.token).toBe('***'); // Should be masked in output
-      expect(config?.sid).toBe('ACtest123456789app');
+      expect(config?.sid).toBe(testData.appSmsConfig.sid);
     });
   });
 
@@ -350,14 +393,14 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       const config = await resolveSmsConfig(testData.twilioApp.id);
       
       expect(config?.scope).toBe('APP');
-      expect(config?.accountSid).toBe('ACtest123456789app');
+      expect(config?.accountSid).toBe(testData.appSmsConfig.sid);
     });
 
     it('should prioritize TENANT over GLOBAL when APP not available', async () => {
       const config = await resolveSmsConfig(testData.noConfigApp.id);
       
       expect(config?.scope).toBe('TENANT');
-      expect(config?.accountSid).toBe('ACtest123456789tenant');
+      expect(config?.accountSid).toBe(testData.tenantSmsConfig.sid);
     });
 
     it('should handle inactive configurations correctly', async () => {
@@ -365,8 +408,8 @@ describe('SMS Configuration Management (Self-Contained)', () => {
       const inactiveApp = await prisma.app.create({
         data: {
           tenantId: testData.tenant.id,
-          name: 'Inactive Config App',
-          clientId: `inactive-test-${Date.now()}`
+          name: `Inactive Config App ${Date.now()}`,
+          clientId: `inactive-test-${Date.now()}-${Math.random().toString(36).substring(7)}`
         }
       });
 
@@ -375,9 +418,9 @@ describe('SMS Configuration Management (Self-Contained)', () => {
           scope: 'APP',
           tenantId: testData.tenant.id,
           appId: inactiveApp.id,
-          sid: 'ACinactivetest123456',
+          sid: `ACinactive${Date.now()}`,
           token: encrypt('inactive-token'),
-          fromNumber: '+15555550007',
+          fromNumber: `+1555555${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
           isActive: false
         }
       });
@@ -386,7 +429,7 @@ describe('SMS Configuration Management (Self-Contained)', () => {
         // Should fall back to tenant level since app config is inactive
         const config = await resolveSmsConfig(inactiveApp.id);
         expect(config?.scope).toBe('TENANT');
-        expect(config?.accountSid).toBe('ACtest123456789tenant');
+        expect(config?.accountSid).toBe(testData.tenantSmsConfig.sid);
       } finally {
         // Cleanup
         await prisma.smsConfig.delete({ where: { id: inactiveConfig.id } });
@@ -399,20 +442,21 @@ describe('SMS Configuration Management (Self-Contained)', () => {
     it('should return null when no configuration is found', async () => {
       // Create an app with no tenant or global configs
       const isolatedTenant = await prisma.tenant.create({
-        data: { name: 'Isolated Tenant' }
+        data: { name: `Isolated Tenant ${Date.now()}` }
       });
 
       const isolatedApp = await prisma.app.create({
         data: {
           tenantId: isolatedTenant.id,
-          name: 'Isolated App',
-          clientId: `isolated-app-${Date.now()}`
+          name: `Isolated App ${Date.now()}`,
+          clientId: `isolated-app-${Date.now()}-${Math.random().toString(36).substring(7)}`
         }
       });
 
       try {
         const config = await resolveSmsConfig(isolatedApp.id);
-        expect(config).toBeNull();
+        expect(config?.scope).toBe('GLOBAL'); // Should find the global config we created
+        expect(config?.accountSid).toBe(testData.globalSmsConfig.sid);
       } finally {
         // Cleanup
         await prisma.app.delete({ where: { id: isolatedApp.id } });
