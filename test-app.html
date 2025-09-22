@@ -82,6 +82,14 @@
             background-color: #0056b3;
         }
         
+        button[style*="background-color: #dc3545;"]:hover {
+            background-color: #c82333 !important;
+        }
+        
+        button[style*="background-color: #28a745;"]:hover {
+            background-color: #218838 !important;
+        }
+        
         button:disabled {
             background-color: #6c757d;
             cursor: not-allowed;
@@ -141,6 +149,14 @@
             <option value="outings">Outings</option>
             <option value="invalid-app">Invalid App</option>
         </select>
+        </div>
+        
+        <div class="action-section">
+            <h3>Authentication Test Controls</h3>
+            <p>Clear stored authentication tokens to test the IDP authentication flow from scratch.</p>
+            <button id="clear-token-btn" onclick="clearAuthTokens()" style="background-color: #dc3545;">Clear Auth Tokens</button>
+            <button id="check-token-btn" onclick="checkAuthStatus()" style="background-color: #28a745;">Check Auth Status</button>
+            <div id="auth-status-result" class="result"></div>
         </div>
         
         <div class="app-selection">
@@ -911,6 +927,101 @@
                 showResult('sms-logs-result', `Error: ${error.message}`, 'error');
             } finally {
                 hideLoading('sms-logs-btn', 'View SMS Logs');
+            }
+        }
+        
+        // Authentication management functions
+        function clearAuthTokens() {
+            hideResult('auth-status-result');
+            showLoading('clear-token-btn');
+            
+            try {
+                // Clear all authentication-related localStorage items used by mail-service UI
+                const keysToRemove = [
+                    'authToken',
+                    'userToken', 
+                    'appToken',
+                    'appId',
+                    'tenantId',
+                    'user',
+                    'roles',
+                    'tokenExpiry',
+                    'lastAuthCheck',
+                    'currentView',
+                    'viewState'
+                ];
+                
+                let removedKeys = [];
+                keysToRemove.forEach(key => {
+                    if (localStorage.getItem(key) !== null) {
+                        localStorage.removeItem(key);
+                        removedKeys.push(key);
+                    }
+                });
+                
+                // Also clear sessionStorage items
+                keysToRemove.forEach(key => {
+                    if (sessionStorage.getItem(key) !== null) {
+                        sessionStorage.removeItem(key);
+                        removedKeys.push(`${key} (session)`);
+                    }
+                });
+                
+                const message = removedKeys.length > 0 
+                    ? `Cleared authentication tokens: ${removedKeys.join(', ')}`
+                    : 'No authentication tokens found to clear';
+                    
+                showResult('auth-status-result', message, 'success');
+                
+            } catch (error) {
+                console.error('Clear tokens error:', error);
+                showResult('auth-status-result', `Error clearing tokens: ${error.message}`, 'error');
+            } finally {
+                hideLoading('clear-token-btn', 'Clear Auth Tokens');
+            }
+        }
+        
+        function checkAuthStatus() {
+            hideResult('auth-status-result');
+            showLoading('check-token-btn');
+            
+            try {
+                const authItems = [
+                    'authToken',
+                    'userToken', 
+                    'appToken',
+                    'appId',
+                    'tenantId',
+                    'user',
+                    'roles'
+                ];
+                
+                let statusInfo = [];
+                authItems.forEach(key => {
+                    const value = localStorage.getItem(key);
+                    if (value !== null) {
+                        if (key === 'authToken' || key === 'userToken' || key === 'appToken') {
+                            // For tokens, just show if they exist and length
+                            statusInfo.push(`${key}: present (${value.length} chars)`);
+                        } else {
+                            // For other items, show the actual value (but truncate if too long)
+                            const displayValue = value.length > 50 ? value.substring(0, 50) + '...' : value;
+                            statusInfo.push(`${key}: ${displayValue}`);
+                        }
+                    }
+                });
+                
+                const message = statusInfo.length > 0 
+                    ? `Current auth state:\n${statusInfo.join('\n')}`
+                    : 'No authentication tokens found in localStorage';
+                    
+                showResult('auth-status-result', message, 'info');
+                
+            } catch (error) {
+                console.error('Check auth status error:', error);
+                showResult('auth-status-result', `Error checking auth status: ${error.message}`, 'error');
+            } finally {
+                hideLoading('check-token-btn', 'Check Auth Status');
             }
         }
         
