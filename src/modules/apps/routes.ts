@@ -49,6 +49,44 @@ export async function registerAppRoutes(app: FastifyInstance) {
     return prisma.app.findMany({ where: effectiveTenantId ? { tenantId: effectiveTenantId } : undefined, orderBy: { createdAt: 'desc' } });
   });
 
+  // Get single app by ID
+  app.get('/apps/:id', async (req, reply) => {
+    const userContext = await AuthService.requireRole(req, reply, ['tenant_admin', 'superadmin', 'editor']);
+    if (!userContext) return; // Response already sent
+
+    const { id } = req.params as any;
+    const prisma = getPrisma();
+    
+    try {
+      const app = await prisma.app.findUnique({ 
+        where: { id },
+        select: { 
+          id: true, 
+          name: true, 
+          clientId: true, 
+          tenantId: true,
+          createdAt: true
+        }
+      });
+      
+      if (!app) {
+        return reply.notFound('Application not found');
+      }
+      
+      // For tenant admins and editors, verify they have access to this app
+      if (!userContext.roles.includes('superadmin')) {
+        if (app.tenantId !== userContext.tenantId) {
+          return reply.forbidden('Access denied to this application');
+        }
+      }
+      
+      return app;
+    } catch (e: any) {
+      app.log.error({ err: e, appId: id }, 'Error getting app');
+      return reply.internalServerError('Failed to get application');
+    }
+  });
+
   app.put('/apps/:id', async (req, reply) => {
     const userContext = await AuthService.requireRole(req, reply, ['tenant_admin', 'superadmin']);
     if (!userContext) return; // Response already sent
