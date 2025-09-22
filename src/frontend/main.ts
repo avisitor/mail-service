@@ -364,10 +364,17 @@ class ComposeView implements IView {
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('returnUrl');
     
+    console.log('[ComposeView] updateButtonVisibility - returnUrl:', returnUrl);
+    console.log('[ComposeView] Current URL:', window.location.href);
+    
     // Show Cancel button when coming from an app (has returnUrl)
     const cancelBtn = document.getElementById('cancelEmailBtn') as HTMLElement;
     if (cancelBtn) {
-      cancelBtn.style.display = returnUrl ? 'inline-block' : 'none';
+      const shouldShow = !!returnUrl;
+      cancelBtn.style.display = shouldShow ? 'inline-block' : 'none';
+      console.log('[ComposeView] Cancel button visibility set to:', shouldShow ? 'visible' : 'hidden');
+    } else {
+      console.warn('[ComposeView] Cancel button element not found');
     }
   }
 
