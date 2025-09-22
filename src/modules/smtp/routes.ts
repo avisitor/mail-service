@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from '../../auth/service.js';
+import { validateAppAccess } from '../../utils/app-validation.js';
 import {
   listSmtpConfigs,
   getSmtpConfig,
@@ -198,15 +199,44 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
       const { tenantId } = req.params as { tenantId: string };
       const { appId } = req.query as { appId?: string };
 
-      // Access control: only superadmins or tenant members can view effective config (when auth enabled)
-      if (userContext) {
-        const isSuperAdmin = userContext.roles.includes('superadmin');
-        if (!isSuperAdmin && userContext.tenantId !== tenantId) {
-          return reply.forbidden('Cannot view SMTP configuration for different tenant');
+      // If appId is provided, validate it and get the actual tenant from the app
+      let actualTenantId = tenantId;
+      if (appId) {
+        const appValidation = await validateAppAccess(req, appId);
+        if (!appValidation.success) {
+          return reply.badRequest(`Invalid appId: ${appValidation.error}`);
+        }
+        
+        // Use the app's actual tenantId, not the one from the URL parameter
+        actualTenantId = appValidation.app.tenantId;
+        
+        // Verify the URL parameter matches the app's tenant
+        if (tenantId !== actualTenantId) {
+          return reply.badRequest(`AppId ${appId} belongs to tenant ${actualTenantId}, not ${tenantId}`);
         }
       }
 
-      const config = await getEffectiveSmtpConfig(tenantId, appId);
+      // Access control: only superadmins or users with access to the app/tenant can view effective config
+      if (userContext) {
+        const isSuperAdmin = userContext.roles.includes('superadmin');
+        
+        if (!isSuperAdmin) {
+          // For editors, check if they have access to the specific app (if provided)
+          if (appId) {
+            const appValidation = await validateAppAccess(req, appId);
+            if (!appValidation.success) {
+              return reply.forbidden(`No access to application ${appId}`);
+            }
+          } else {
+            // For tenant-only access, check tenant membership
+            if (userContext.tenantId && userContext.tenantId !== actualTenantId) {
+              return reply.forbidden('Cannot view SMTP configuration for different tenant');
+            }
+          }
+        }
+      }
+
+      const config = await getEffectiveSmtpConfig(actualTenantId, appId);
       return config;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to get effective SMTP config');
@@ -243,15 +273,42 @@ export async function registerSmtpRoutes(app: FastifyInstance) {
         return reply.badRequest('tenantId query parameter is required for TENANT/APP scope');
       }
 
-      // Access control: only superadmins or tenant members can view effective config (when auth enabled)
+      // If appId is provided, validate it and get the actual tenant from the app
+      let actualTenantId = tenantId;
+      if (appId) {
+        const appValidation = await validateAppAccess(req, appId);
+        if (!appValidation.success) {
+          return reply.badRequest(`Invalid appId: ${appValidation.error}`);
+        }
+        
+        // Use the app's actual tenantId, not the one from the request
+        actualTenantId = appValidation.app.tenantId;
+        
+        // Log for debugging
+        console.log(`[SMTP Config] AppId ${appId} belongs to tenant ${actualTenantId}, request specified ${tenantId}`);
+      }
+
+      // Access control: only superadmins or users with access to the app/tenant can view effective config
       if (userContext) {
         const isSuperAdmin = userContext.roles.includes('superadmin');
-        if (!isSuperAdmin && userContext.tenantId !== tenantId) {
-          return reply.forbidden('Cannot view SMTP configuration for different tenant');
+        
+        if (!isSuperAdmin) {
+          // For editors, check if they have access to the specific app (if provided)
+          if (appId) {
+            const appValidation = await validateAppAccess(req, appId);
+            if (!appValidation.success) {
+              return reply.forbidden(`No access to application ${appId}`);
+            }
+          } else {
+            // For tenant-only access, check tenant membership
+            if (userContext.tenantId && userContext.tenantId !== actualTenantId) {
+              return reply.forbidden('Cannot view SMTP configuration for different tenant');
+            }
+          }
         }
       }
 
-      const config = await getEffectiveSmtpConfig(tenantId, scope === 'APP' ? appId : undefined);
+      const config = await getEffectiveSmtpConfig(actualTenantId, scope === 'APP' ? appId : undefined);
       return config;
     } catch (error: any) {
       app.log.error({ error }, 'Failed to get effective SMTP config by scope');
