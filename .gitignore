@@ -17,6 +17,10 @@ backups/.last_checksum
 backups/latest_backup.sql
 backups/mailservice_backup_*.sql.gz
 
+# Sensitive configuration files with real credentials
+create_sms_config.sql
+restore_smtp_configs.sql
+
 # Logs
 logs/
 *.log
