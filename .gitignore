@@ -14,6 +14,7 @@ src/frontend/main.js.map
 
 # Backups
 backups/.last_checksum
+backups/latest_backup.sql
 backups/mailservice_backup_*.sql.gz
 
 # Logs
