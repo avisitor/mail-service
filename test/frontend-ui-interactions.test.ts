@@ -189,7 +189,7 @@ describe('Core UI Interactions', () => {
     });
 
     it('should handle loading states during content fetch', async () => {
-      const loadBtn = document.getElementById('loadDataBtn') as HTMLElement;
+      const loadBtn = document.getElementById('loadDataBtn') as HTMLButtonElement;
       const loadingIndicator = document.getElementById('loadingIndicator') as HTMLElement;
       const container = document.getElementById('contentContainer') as HTMLElement;
       

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
-import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import jwt from 'jsonwebtoken';
 
 const REAL_TENANT_ID = 'cmfgkxlyt000010msi8qxmraa';
@@ -9,11 +9,11 @@ const REAL_APP_ID = 'cmfgkybbi000410mssq4gnw8a';
 
 function getPrivateKey() {
   const keyPath = 'keys/private-6ca1a309a735fb83.pem';
-  if (!fs.existsSync(keyPath)) {
+  if (!existsSync(keyPath)) {
     throw new Error(`Real IDP key not found at ${keyPath}`);
   }
   
-  const key = fs.readFileSync(keyPath, 'utf8');
+  const key = readFileSync(keyPath, 'utf8');
   return { kid: '6ca1a309a735fb83', key };
 }
 

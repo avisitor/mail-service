@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import jwt from 'jsonwebtoken';
-import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
 
 // Simple test to debug JWT token passing with RS256
 describe('JWT Debug', () => {
@@ -13,7 +13,7 @@ describe('JWT Debug', () => {
 
   it('should pass RS256 JWT token correctly', async () => {
     // Create RS256 token with real private key
-    const privateKey = fs.readFileSync('keys/private-6ca1a309a735fb83.pem', 'utf8');
+    const privateKey = readFileSync('keys/private-6ca1a309a735fb83.pem', 'utf8');
     
     const payload = {
       sub: 'test@example.com',

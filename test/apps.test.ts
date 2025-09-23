@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { getPrisma } from '../src/db/prisma.js';
-import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import jwt from 'jsonwebtoken';
 
 // Use real test data 
@@ -13,11 +13,11 @@ const dbValid = (config.databaseUrl || '').startsWith('mysql://');
 
 function getPrivateKey() {
   const keyPath = 'keys/private-6ca1a309a735fb83.pem';
-  if (!fs.existsSync(keyPath)) {
+  if (!existsSync(keyPath)) {
     throw new Error(`Real IDP key not found at ${keyPath}. Run setup scripts first.`);
   }
   
-  const key = fs.readFileSync(keyPath, 'utf8');
+  const key = readFileSync(keyPath, 'utf8');
   return { kid: '6ca1a309a735fb83', key };
 }
 
@@ -70,6 +70,22 @@ describe('Apps API', () => {
       create: { id: REAL_TENANT_ID, name: 'Test Tenant' },
       update: {}
     });
+  });
+
+  afterEach(async () => {
+    if (prisma) {
+      // Clean up any apps created during testing
+      await prisma.app.deleteMany({
+        where: {
+          OR: [
+            { tenantId: REAL_TENANT_ID },
+            { tenantId: 'test-tenant-2' }
+          ]
+        }
+      });
+      // Clean up test tenant
+      await prisma.tenant.delete({ where: { id: REAL_TENANT_ID } }).catch(() => {});
+    }
   });
 
   describe('POST /apps', () => {

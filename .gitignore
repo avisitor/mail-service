@@ -10,6 +10,11 @@ yarn-error.log*
 
 # Compiled frontend files (generated from TypeScript)
 src/frontend/main.js
+src/frontend/main.js.map
+
+# Backups
+backups/.last_checksum
+backups/mailservice_backup_*.sql.gz
 
 # Logs
 logs/

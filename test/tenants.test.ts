@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
-import fs from 'fs';
+import { getPrisma } from '../src/db/prisma.js';
+import { existsSync, readFileSync } from 'fs';
 import jwt from 'jsonwebtoken';
 
 // Mock database URL validation
@@ -9,11 +10,11 @@ const dbValid = (config.databaseUrl || '').startsWith('mysql://');
 
 function getPrivateKey() {
   const keyPath = 'keys/private-6ca1a309a735fb83.pem';
-  if (!fs.existsSync(keyPath)) {
+  if (!existsSync(keyPath)) {
     throw new Error(`Real IDP key not found at ${keyPath}. Run setup scripts first.`);
   }
   
-  const key = fs.readFileSync(keyPath, 'utf8');
+  const key = readFileSync(keyPath, 'utf8');
   return { kid: '6ca1a309a735fb83', key };
 }
 
@@ -39,6 +40,7 @@ function createTestToken(payload: any): string {
 
 describe('Tenants API', () => {
   let app: any;
+  let createdTenantIds: string[] = [];
 
   if (!dbValid) {
     it.skip('skipped because DATABASE_URL is not mysql://', () => {});
@@ -47,6 +49,18 @@ describe('Tenants API', () => {
 
   beforeEach(async () => {
     app = buildApp();
+  });
+
+  afterEach(async () => {
+    if (createdTenantIds.length > 0) {
+      const prisma = getPrisma();
+      // Delete any apps first (foreign key constraint)
+      for (const tenantId of createdTenantIds) {
+        await prisma.app.deleteMany({ where: { tenantId } }).catch(() => {});
+        await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => {});
+      }
+      createdTenantIds = [];
+    }
   });
 
   describe('POST /tenants', () => {
@@ -72,6 +86,7 @@ describe('Tenants API', () => {
 
       expect(res.statusCode).toBe(201);
       const created = JSON.parse(res.payload);
+      createdTenantIds.push(created.id); // Track for cleanup
       expect(created.name).toBe('Test Tenant');
       expect(created.id).toBeDefined();
       expect(created.status).toBe('active'); // Default status

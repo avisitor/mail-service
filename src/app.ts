@@ -13,10 +13,12 @@ import { registerTemplateRoutes } from './modules/templates/routes.js';
 import { registerSmtpRoutes } from './modules/smtp/routes.js';
 import { registerComposeRoutes } from './modules/compose/routes.js';
 import { registerSmsRoutes } from './modules/sms/routes.js';
+import { registerWebhookRoutes } from './modules/webhooks/routes.js';
 import { extractUser } from './auth/roles.js';
 import { createIdpRedirectUrl, checkAuthentication } from './auth/idp-redirect.js';
 import { registerTenantRoutes } from './modules/tenants/routes.js';
 import { registerAppRoutes } from './modules/apps/routes.js';
+import { registerLogRoutes } from './modules/logs/routes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
@@ -87,8 +89,10 @@ export function buildApp() {
   registerSmtpRoutes(app);
   registerComposeRoutes(app);
   registerSmsRoutes(app);
+  registerWebhookRoutes(app);
   registerTenantRoutes(app);
   registerAppRoutes(app);
+  registerLogRoutes(app);
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
@@ -482,7 +486,7 @@ export function buildApp() {
     }
   });
   
-  // Compose email route - redirects to IDP for authentication then shows compose interface
+  // Compose email route - always redirects to frontend UI which handles authentication
   app.get('/compose', async (req, reply) => {
     const { appId, returnUrl, recipients } = req.query as any;
     
@@ -505,28 +509,14 @@ export function buildApp() {
     }
     console.log('[/compose] AppId validated successfully:', validation.app.name);
     
-    // Check authentication using the centralized helper
-    const { isAuthenticated } = await checkAuthentication(req);
-    
-    if (isAuthenticated) {
-      // User is authenticated, show compose interface
-      const composeParams = new URLSearchParams({
-        view: 'compose',
-        ...(appId && { appId }),
-        ...(returnUrl && { returnUrl }),
-        ...(recipients && { recipients })
-      });
-      return reply.redirect(`/ui?${composeParams}`);
-    } else {
-      // User not authenticated, redirect to IDP using the working pattern
-      const finalDestination = `/ui?view=compose${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}${recipients ? `&recipients=${encodeURIComponent(recipients)}` : ''}`;
-      const idpUrl = createIdpRedirectUrl({
-        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
-        appId
-      });
-      
-      return reply.redirect(idpUrl);
-    }
+    // Always redirect to frontend UI - let frontend JavaScript handle authentication
+    const composeParams = new URLSearchParams({
+      view: 'compose',
+      ...(appId && { appId }),
+      ...(returnUrl && { returnUrl }),
+      ...(recipients && { recipients })
+    });
+    return reply.redirect(`/ui?${composeParams}`);
   });
   
   // Template Editor route - redirects to IDP for authentication then shows template editor interface (tenant admin only)
@@ -630,6 +620,114 @@ export function buildApp() {
         appId
       });
       console.log('[/admin] IDP redirect URL:', idpUrl);
+      
+      return reply.redirect(idpUrl);
+    }
+  });
+  
+  // Email logs route - redirects to IDP for authentication then shows email logs interface (tenant admin only)
+  app.get('/email-logs', async (req, reply) => {
+    const { appId, returnUrl } = req.query as any;
+    
+    // Validate appId is provided and exists in database
+    if (!appId) {
+      console.error('[/email-logs] AppId is required');
+      return reply.code(400).send({ 
+        error: 'Missing Application ID', 
+        message: 'appId parameter is required for email logs endpoint' 
+      });
+    }
+    
+    const validation = await validateAppId(appId);
+    if (!validation.isValid) {
+      console.error('[/email-logs] AppId validation failed:', validation.error);
+      return reply.code(400).send({ 
+        error: 'Invalid Application', 
+        message: validation.error 
+      });
+    }
+    console.log('[/email-logs] AppId validated successfully:', validation.app.name);
+    
+    // Check authentication using the centralized helper
+    const { isAuthenticated, userContext } = await checkAuthentication(req);
+    
+    if (isAuthenticated) {
+      // Check if user has admin permissions
+      const hasAdminRole = userContext?.roles?.includes('tenant-admin') || userContext?.roles?.includes('superadmin');
+      
+      if (!hasAdminRole) {
+        console.log('[/email-logs] Access denied - insufficient permissions');
+        return reply.code(403).send({ error: 'Insufficient permissions' });
+      }
+      
+      // User is authenticated and has admin role, show email logs interface
+      const logsParams = new URLSearchParams({
+        view: 'email-logs',
+        ...(appId && { appId }),
+        ...(returnUrl && { returnUrl })
+      });
+      return reply.redirect(`/ui?${logsParams}`);
+    } else {
+      // User not authenticated, redirect to IDP using the working pattern
+      const finalDestination = `/ui?view=email-logs${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
+      const idpUrl = createIdpRedirectUrl({
+        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        appId
+      });
+      
+      return reply.redirect(idpUrl);
+    }
+  });
+  
+  // SMS logs route - redirects to IDP for authentication then shows SMS logs interface (tenant admin only)
+  app.get('/sms-logs', async (req, reply) => {
+    const { appId, returnUrl } = req.query as any;
+    
+    // Validate appId is provided and exists in database
+    if (!appId) {
+      console.error('[/sms-logs] AppId is required');
+      return reply.code(400).send({ 
+        error: 'Missing Application ID', 
+        message: 'appId parameter is required for SMS logs endpoint' 
+      });
+    }
+    
+    const validation = await validateAppId(appId);
+    if (!validation.isValid) {
+      console.error('[/sms-logs] AppId validation failed:', validation.error);
+      return reply.code(400).send({ 
+        error: 'Invalid Application', 
+        message: validation.error 
+      });
+    }
+    console.log('[/sms-logs] AppId validated successfully:', validation.app.name);
+    
+    // Check authentication using the centralized helper
+    const { isAuthenticated, userContext } = await checkAuthentication(req);
+    
+    if (isAuthenticated) {
+      // Check if user has admin permissions
+      const hasAdminRole = userContext?.roles?.includes('tenant-admin') || userContext?.roles?.includes('superadmin');
+      
+      if (!hasAdminRole) {
+        console.log('[/sms-logs] Access denied - insufficient permissions');
+        return reply.code(403).send({ error: 'Insufficient permissions' });
+      }
+      
+      // User is authenticated and has admin role, show SMS logs interface
+      const smsLogsParams = new URLSearchParams({
+        view: 'sms-logs',
+        ...(appId && { appId }),
+        ...(returnUrl && { returnUrl })
+      });
+      return reply.redirect(`/ui?${smsLogsParams}`);
+    } else {
+      // User not authenticated, redirect to IDP using the working pattern
+      const finalDestination = `/ui?view=sms-logs${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
+      const idpUrl = createIdpRedirectUrl({
+        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        appId
+      });
       
       return reply.redirect(idpUrl);
     }
@@ -743,6 +841,21 @@ export function buildApp() {
     
     if (!appId || (!subject && !templateId) || !Array.isArray(recipients) || recipients.length === 0) {
       return reply.badRequest('appId, (subject or templateId), recipients required');
+    }
+
+    // Validate schedule time if provided
+    if (scheduleAt) {
+      const scheduledDate = new Date(scheduleAt);
+      
+      // Check if date is valid
+      if (isNaN(scheduledDate.getTime())) {
+        return reply.badRequest('Invalid scheduleAt format. Use ISO 8601 format (YYYY-MM-DDTHH:mm:ss.sssZ)');
+      }
+      
+      // Check if date is in the future
+      if (scheduledDate <= new Date()) {
+        return reply.badRequest('scheduleAt must be a future date and time');
+      }
     }
     try {
       const prismaModule = await import('./db/prisma.js');

@@ -1,6 +1,6 @@
 import { getPrisma, isPrismaDisabled } from '../../db/prisma.js';
 import { SmsConfigInput, SmsConfigOutput, ResolvedSmsConfig } from './types.js';
-import crypto from 'crypto';
+import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
 
 // Simple encryption for sensitive fields (in production, use proper key management)
 const ENCRYPTION_KEY_STRING = process.env.SMS_ENCRYPTION_KEY || 'default-key-change-in-production-32b';
@@ -23,8 +23,8 @@ function getEncryptionKey(): Buffer {
 function encrypt(text: string): string {
   if (!text) return text;
   
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(), iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   return iv.toString('hex') + ':' + encrypted;
@@ -42,7 +42,7 @@ function decrypt(encryptedText: string): string {
       }
       const iv = Buffer.from(textParts[0], 'hex');
       const encrypted = textParts[1];
-      const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
+      const decipher = createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       return decrypted;
@@ -58,7 +58,7 @@ function decrypt(encryptedText: string): string {
     const legacyKey = ENCRYPTION_KEY_STRING.slice(0, 32).padEnd(32, '0');
     
     // Try ECB mode (no IV) which is closest to createDecipher behavior
-    const decipher = crypto.createDecipheriv('aes-256-ecb', Buffer.from(legacyKey, 'utf8'), null);
+    const decipher = createDecipheriv('aes-256-ecb', Buffer.from(legacyKey, 'utf8'), null);
     decipher.setAutoPadding(true);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
@@ -68,7 +68,7 @@ function decrypt(encryptedText: string): string {
     try {
       const legacyKey = ENCRYPTION_KEY_STRING.slice(0, 32).padEnd(32, '0');
       const zeroIv = Buffer.alloc(16);
-      const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(legacyKey, 'utf8'), zeroIv);
+      const decipher = createDecipheriv('aes-256-cbc', Buffer.from(legacyKey, 'utf8'), zeroIv);
       decipher.setAutoPadding(true);
       let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
       decrypted += decipher.final('utf8');

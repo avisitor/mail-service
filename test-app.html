@@ -156,6 +156,7 @@
             <p>Clear stored authentication tokens to test the IDP authentication flow from scratch.</p>
             <button id="clear-token-btn" onclick="clearAuthTokens()" style="background-color: #dc3545;">Clear Auth Tokens</button>
             <button id="check-token-btn" onclick="checkAuthStatus()" style="background-color: #28a745;">Check Auth Status</button>
+            <button id="test-external-flow-btn" onclick="testExternalAppFlow()" style="background-color: #007bff;">Test External App Flow</button>
             <div id="auth-status-result" class="result"></div>
         </div>
         
@@ -170,13 +171,13 @@
         </div>
         
                 <div class="action-section">
-            <h3>1. Send Message (Test Mode - No Authentication)</h3>
-            <p>Send a static test message to MailHog using the application context. This bypasses authentication for testing purposes.</p>
+            <h3>1. Send Message (Test Endpoint - With Authentication)</h3>
+            <p>Send a static test message to MailHog using the /api/send-test endpoint with secure authentication.</p>
             <button id="send-message-btn" onclick="sendMessage()">Send Test Message</button>
             <div id="send-message-result" class="result"></div>
-            
-            <h4>Send Message (Production Mode - With Authentication)</h4>
-            <p>Send a message using proper application token authentication (currently not working due to auth setup).</p>
+
+            <h4>Send Message (Production Endpoint - With Authentication)</h4>
+            <p>Send a message using the production /api/send endpoint with proper application token authentication.</p>
             <button id="send-message-auth-btn" onclick="sendMessageWithAuth()">Send Message (With Auth)</button>
             <div id="send-message-auth-result" class="result"></div>
         </div>
@@ -260,7 +261,7 @@
                 appId: 'cmfka688r0001b77ofpgm57ix',
                 clientId: 'retree-hawaii-client',
                 // In production, this should be loaded from secure environment variables
-                clientSecret: 'HPWt1XoWcAwHVFSwjGYUc/Znci/D0rjlBv1IrHmoNI8=',
+                clientSecret: 'bXwMxsX40R47QaZLA0oK3t1yDH+Y/cS/+X0Bu55jjN8=',
                 description: 'Forest restoration and tree planting application (inherits Robs World Gmail SMTP)'
             },
             'outings': {
@@ -268,7 +269,7 @@
                 appId: 'outings-app-id',
                 clientId: 'outings-client',
                 // In production, this should be loaded from secure environment variables
-                clientSecret: 'DTlNwEBSUpusSOCcf/yqxXwXxrgG3a8S1MyRCPo5bhs=',
+                clientSecret: 'IojBa/D/1OV41aKbLH3TEav7ADw8c/SJpt6hvPXsjEA=',
                 description: 'Sierra Club Maui outings management system (inherits Robs World Gmail SMTP)'
             },
             'invalid-app': {
@@ -327,7 +328,7 @@
             showLoading('send-message-btn');
             
             try {
-                // First, get application token for silent authentication
+                // Get application token with client secret (secure mode)
                 const tokenResponse = await fetch('/api/token', {
                     method: 'POST',
                     headers: {
@@ -335,6 +336,7 @@
                     },
                     body: JSON.stringify({
                         appId: app.appId,
+                        clientSecret: app.clientSecret,
                         type: 'application'
                     })
                 });
@@ -409,6 +411,7 @@
                     },
                     body: JSON.stringify({
                         appId: app.appId,
+                        clientSecret: app.clientSecret,
                         type: 'application'
                     })
                 });
@@ -1022,6 +1025,54 @@
                 showResult('auth-status-result', `Error checking auth status: ${error.message}`, 'error');
             } finally {
                 hideLoading('check-token-btn', 'Check Auth Status');
+            }
+        }
+        
+        // Test external app flow with URL parameters
+        function testExternalAppFlow() {
+            hideResult('auth-status-result');
+            showLoading('test-external-flow-btn');
+            
+            try {
+                // First clear all tokens to ensure we go through IDP
+                const keysToRemove = [
+                    'authToken',
+                    'userToken', 
+                    'appToken',
+                    'appId',
+                    'tenantId',
+                    'user',
+                    'roles',
+                    'tokenExpiry',
+                    'lastAuthCheck',
+                    'currentView',
+                    'viewState'
+                ];
+                
+                keysToRemove.forEach(key => {
+                    localStorage.removeItem(key);
+                    sessionStorage.removeItem(key);
+                });
+                
+                showResult('auth-status-result', 'Cleared tokens, redirecting to mail-service with URL parameters...', 'success');
+                
+                // Simulate coming from ReTree Hawaii with URL parameters
+                const testUrl = 'http://localhost:3100/ui?' + 
+                    'view=compose' +
+                    '&appId=cmfka688r0001b77ofpgm57ix' +
+                    '&recipients=test@example.com,another@example.com' +
+                    '&subject=Test Subject' +
+                    '&returnUrl=' + encodeURIComponent(window.location.origin + '/test-app.html');
+                
+                // Small delay to let the user see the message
+                setTimeout(() => {
+                    window.location.href = testUrl;
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Test external flow error:', error);
+                showResult('auth-status-result', `Error: ${error.message}`, 'error');
+                hideLoading('test-external-flow-btn', 'Test External App Flow');
             }
         }
         

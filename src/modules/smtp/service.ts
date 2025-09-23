@@ -1,17 +1,23 @@
 import { getPrisma, isPrismaDisabled } from '../../db/prisma.js';
 import { SmtpConfigInput, SmtpConfigOutput, ResolvedSmtpConfig } from './types.js';
 import { config } from '../../config.js';
-import crypto from 'crypto';
+import { randomBytes, createCipheriv, createDecipheriv, scryptSync } from 'crypto';
 
 // Simple encryption for sensitive fields (in production, use proper key management)
-const ENCRYPTION_KEY = process.env.SMTP_ENCRYPTION_KEY || 'default-key-change-in-production-32b';
+const ENCRYPTION_KEY_STRING = process.env.SMTP_ENCRYPTION_KEY || 'default-key-change-in-production-32b';
 const ALGORITHM = 'aes-256-cbc';
+
+// Derive a proper key from the string
+function getKey(): Buffer {
+  return scryptSync(ENCRYPTION_KEY_STRING, 'salt', 32);
+}
 
 function encrypt(text: string): string {
   if (!text) return text;
   try {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipher(ALGORITHM, ENCRYPTION_KEY);
+    const iv = randomBytes(16);
+    const key = getKey();
+    const cipher = createCipheriv(ALGORITHM, key, iv);
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
     return iv.toString('hex') + ':' + encrypted;
@@ -26,7 +32,8 @@ export function decrypt(text: string): string {
     const parts = text.split(':');
     const iv = Buffer.from(parts[0], 'hex');
     const encryptedText = parts[1];
-    const decipher = crypto.createDecipher(ALGORITHM, ENCRYPTION_KEY);
+    const key = getKey();
+    const decipher = createDecipheriv(ALGORITHM, key, iv);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;

@@ -244,6 +244,9 @@ class ComposeView implements IView {
   private recipientCount = 0;
   private eventListenersSetup = false;
   private recipientsData: any[] = [];
+  private recipientEmails: string = '';
+  private subjectFromUrl: string = '';
+  private participantContextData: any[] = [];
   private isRestoringState = false;
 
   constructor() {
@@ -263,6 +266,8 @@ class ComposeView implements IView {
     const appIdFromUrl = urlParams.get('appId');
     const recipientsFromUrl = urlParams.get('recipients');
     const returnUrlFromUrl = urlParams.get('returnUrl');
+    const subjectFromUrl = urlParams.get('subject');
+    const participantDataFromUrl = urlParams.get('participantData');
     
     // Set currentAppId for this view
     if (appIdFromUrl) {
@@ -286,10 +291,34 @@ class ComposeView implements IView {
     // Handle recipients data if provided
     if (recipientsFromUrl) {
       try {
+        // First try to parse as JSON (for complex recipient data)
         this.recipientsData = JSON.parse(decodeURIComponent(recipientsFromUrl));
-        console.log('[ComposeView] Recipients data from URL:', this.recipientsData);
+        console.log('[ComposeView] Recipients data from URL (JSON):', this.recipientsData);
       } catch (error) {
-        console.warn('[ComposeView] Failed to parse recipients data:', error);
+        // If JSON parsing fails, treat as comma-separated email addresses
+        console.log('[ComposeView] Recipients as comma-separated string:', recipientsFromUrl);
+        const emailAddresses = decodeURIComponent(recipientsFromUrl).split(',').map(email => email.trim()).filter(email => email.length > 0);
+        if (emailAddresses.length > 0) {
+          // Store the recipient emails to populate later
+          this.recipientEmails = emailAddresses.join('\n');
+          console.log('[ComposeView] Parsed recipient emails:', this.recipientEmails);
+        }
+      }
+    }
+
+    // Handle subject if provided
+    if (subjectFromUrl) {
+      this.subjectFromUrl = decodeURIComponent(subjectFromUrl);
+      console.log('[ComposeView] Subject from URL:', this.subjectFromUrl);
+    }
+
+    // Handle participant context data if provided
+    if (participantDataFromUrl) {
+      try {
+        this.participantContextData = JSON.parse(decodeURIComponent(participantDataFromUrl));
+        console.log('[ComposeView] Participant context data from URL:', this.participantContextData);
+      } catch (error) {
+        console.warn('[ComposeView] Failed to parse participant context data:', error);
       }
     }
 
@@ -320,6 +349,20 @@ class ComposeView implements IView {
       // If recipients were provided in URL, populate them
       if (this.recipientsData.length > 0) {
         this.populateRecipientsFromData();
+      } else if (this.recipientEmails) {
+        // Handle simple comma-separated email addresses
+        this.populateRecipientsFromEmails();
+      }
+      
+      // Populate subject if provided
+      if (this.subjectFromUrl) {
+        this.populateSubjectFromUrl();
+      }
+      
+      // Populate global compose state with participant context data
+      if (this.participantContextData.length > 0) {
+        composeState.recipientsData = this.participantContextData;
+        console.log('[ComposeView] Populated composeState.recipientsData with participant context:', this.participantContextData.length, 'recipients');
       }
     } else {
       // Check for saved state
@@ -858,6 +901,29 @@ class ComposeView implements IView {
     this.updateRecipientCount();
     
     console.log('[ComposeView] Populated recipients from URL data');
+  }
+
+  private populateRecipientsFromEmails(): void {
+    if (!this.recipientEmails) return;
+    
+    const recipients = document.querySelector('#recipients') as HTMLTextAreaElement;
+    if (!recipients) return;
+    
+    recipients.value = this.recipientEmails;
+    this.updateRecipientCount();
+    
+    console.log('[ComposeView] Populated recipients from email addresses:', this.recipientEmails);
+  }
+
+  private populateSubjectFromUrl(): void {
+    if (!this.subjectFromUrl) return;
+    
+    const subject = document.querySelector('#subject') as HTMLInputElement;
+    if (!subject) return;
+    
+    subject.value = this.subjectFromUrl;
+    
+    console.log('[ComposeView] Populated subject from URL:', this.subjectFromUrl);
   }
 }
 
@@ -3156,6 +3222,36 @@ function applyRoleVisibility() {
 
 function onAuthenticated(cameFromIdp: boolean = false) {
   console.log('[DEBUG] onAuthenticated called with cameFromIdp:', cameFromIdp);
+  
+  // If coming from IDP, restore URL parameters that were saved before redirect
+  if (cameFromIdp) {
+    try {
+      const savedParams = localStorage.getItem('preIdpUrlParams');
+      if (savedParams) {
+        const urlParams = JSON.parse(savedParams);
+        console.log('[DEBUG] Restoring URL parameters after IDP return:', urlParams);
+        
+        // Restore parameters to current URL
+        const currentUrl = new URL(window.location.href);
+        Object.entries(urlParams).forEach(([key, value]) => {
+          if (value && key !== 'token') { // Don't restore token parameter
+            currentUrl.searchParams.set(key, value as string);
+          }
+        });
+        
+        // Update the URL without reloading the page
+        window.history.replaceState({}, document.title, currentUrl.toString());
+        
+        // Clean up the saved parameters
+        localStorage.removeItem('preIdpUrlParams');
+        
+        console.log('[DEBUG] URL restored to:', currentUrl.toString());
+      }
+    } catch (e) {
+      console.warn('[DEBUG] Failed to restore URL parameters:', e);
+    }
+  }
+  
   hideLogin();
   const roles = state.user?.roles || [];
   const userSummary = document.getElementById('userSummary');
@@ -4324,6 +4420,17 @@ async function init() {
       const alreadyRedirected = (() => { try { return sessionStorage.getItem('idpRedirected') === '1'; } catch { return false; } })();
       console.debug('[ui-auth] Already redirected?', alreadyRedirected, 'Came from IDP?', cameFromIdp);
       if (!cameFromIdp && !alreadyRedirected) {
+        // Save current URL parameters before redirecting to IDP
+        const currentUrl = new URL(window.location.href);
+        const urlParams = Object.fromEntries(currentUrl.searchParams.entries());
+        console.debug('[ui-auth] Saving URL parameters before IDP redirect:', urlParams);
+        
+        try {
+          localStorage.setItem('preIdpUrlParams', JSON.stringify(urlParams));
+        } catch (e) {
+          console.warn('[ui-auth] Failed to save URL parameters:', e);
+        }
+        
         const ret = (uiConfig.returnUrl as string) || (window.location.origin + '/ui/');
         const redirect = new URL(idp);
         redirect.searchParams.set('return', ret);
@@ -8342,7 +8449,24 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
 // Return to calling application from compose view (for editors)
 function returnToCallingAppFromCompose() {
     const urlParams = new URLSearchParams(window.location.search);
+    const closeOnSuccess = urlParams.get('closeOnSuccess');
     let returnUrl = urlParams.get('returnUrl');
+    
+    // If closeOnSuccess flag is set, close the window instead of redirecting
+    if (closeOnSuccess === 'true') {
+        console.log('[UI] closeOnSuccess flag detected, closing window');
+        try {
+            window.close();
+            // If window.close() doesn't work (e.g., not opened by script), show message
+            setTimeout(() => {
+                alert('You can now close this window.');
+            }, 100);
+        } catch (error) {
+            console.warn('[UI] Could not close window:', error);
+            alert('Email sent successfully! You can now close this window.');
+        }
+        return;
+    }
     
     // If no returnUrl in current URL, try to get it from localStorage (for post-refresh scenarios)
     if (!returnUrl) {

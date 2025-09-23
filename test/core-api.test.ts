@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
-import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import jwt from 'jsonwebtoken';
 
 // Mock database URL validation
@@ -9,11 +9,11 @@ const dbValid = (config.databaseUrl || '').startsWith('mysql://');
 
 function getPrivateKey() {
   const keyPath = 'keys/private-6ca1a309a735fb83.pem';
-  if (!fs.existsSync(keyPath)) {
+  if (!existsSync(keyPath)) {
     throw new Error(`Real IDP key not found at ${keyPath}. Run setup scripts first.`);
   }
   
-  const key = fs.readFileSync(keyPath, 'utf8');
+  const key = readFileSync(keyPath, 'utf8');
   return { kid: '6ca1a309a735fb83', key };
 }
 
@@ -407,6 +407,174 @@ describe('Mail Service Core API', () => {
         payload: {
           subject: 'Incomplete Request'
           // Missing appId and recipients
+        }
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('should schedule email for future delivery', async () => {
+      const token = createTestToken({
+        sub: 'test-scheduled-mail-user@example.com',
+        roles: ['tenant_admin'],
+        tenantId: 'test-tenant'
+      });
+
+      // Set SMTP_DRY_RUN to avoid actual email sending
+      process.env.SMTP_DRY_RUN = 'true';
+
+      // Create a test app
+      const appRes = await app.inject({
+        method: 'POST',
+        url: '/apps',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          name: 'test-scheduled-mail-app',
+          clientId: `test-scheduled-mail-client-${Date.now()}`,
+          tenantId: 'test-tenant'
+        }
+      });
+
+      const appData = JSON.parse(appRes.payload);
+
+      // Schedule email for 1 minute in the future
+      const scheduleTime = new Date();
+      scheduleTime.setMinutes(scheduleTime.getMinutes() + 1);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/send-now',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          appId: appData.id,
+          subject: 'Scheduled Email Test',
+          html: '<p>This email was scheduled for later delivery</p>',
+          recipients: [
+            { email: 'scheduled@example.com', name: 'Scheduled User' }
+          ],
+          scheduleAt: scheduleTime.toISOString(),
+          testEmail: true
+        }
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.payload);
+      expect(data.groupId).toBeDefined();
+      expect(data.scheduled).toBe(true);
+      expect(data.scheduledAt).toBe(scheduleTime.toISOString());
+
+      // Verify email job was created with correct schedule time
+      const { getPrisma } = await import('../src/db/prisma.js');
+      const prisma = getPrisma();
+      
+      const jobs = await prisma.emailJob.findMany({
+        where: { groupId: data.groupId }
+      });
+      
+      expect(jobs.length).toBe(1);
+      expect(jobs[0].status).toBe('pending');
+      // Allow for small timing differences (within 1 second)
+      const expectedTime = scheduleTime.getTime();
+      const actualTime = new Date(jobs[0].scheduledAt!).getTime();
+      expect(Math.abs(actualTime - expectedTime)).toBeLessThan(1000);
+    });
+
+    it('should reject invalid schedule time format', async () => {
+      const token = createTestToken({
+        sub: 'test-scheduled-mail-invalid@example.com',
+        roles: ['tenant_admin'],
+        tenantId: 'test-tenant'
+      });
+
+      // Create a test app
+      const appRes = await app.inject({
+        method: 'POST',
+        url: '/apps',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          name: 'test-scheduled-mail-invalid-app',
+          clientId: `test-scheduled-mail-invalid-client-${Date.now()}`,
+          tenantId: 'test-tenant'
+        }
+      });
+
+      const appData = JSON.parse(appRes.payload);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/send-now',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          appId: appData.id,
+          subject: 'Invalid Schedule Test',
+          html: '<p>This should fail</p>',
+          recipients: [
+            { email: 'invalid-schedule@example.com', name: 'Invalid User' }
+          ],
+          scheduleAt: 'invalid-date-format',
+          testEmail: true
+        }
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('should reject past schedule time', async () => {
+      const token = createTestToken({
+        sub: 'test-scheduled-mail-past@example.com',
+        roles: ['tenant_admin'],
+        tenantId: 'test-tenant'
+      });
+
+      // Create a test app
+      const appRes = await app.inject({
+        method: 'POST',
+        url: '/apps',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          name: 'test-scheduled-mail-past-app',
+          clientId: `test-scheduled-mail-past-client-${Date.now()}`,
+          tenantId: 'test-tenant'
+        }
+      });
+
+      const appData = JSON.parse(appRes.payload);
+
+      // Schedule email for 1 minute in the past
+      const pastTime = new Date();
+      pastTime.setMinutes(pastTime.getMinutes() - 1);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/send-now',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        payload: {
+          appId: appData.id,
+          subject: 'Past Schedule Test',
+          html: '<p>This should fail</p>',
+          recipients: [
+            { email: 'past-schedule@example.com', name: 'Past User' }
+          ],
+          scheduleAt: pastTime.toISOString(),
+          testEmail: true
         }
       });
 

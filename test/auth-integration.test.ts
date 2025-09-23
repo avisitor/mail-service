@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { getPrisma } from '../src/db/prisma.js';
-import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 
@@ -13,11 +13,11 @@ let TEST_APP_ID: string;
 // Use the real IDP key (same as generate-test-token.mjs)
 function getPrivateKey() {
   const keyPath = 'keys/private-6ca1a309a735fb83.pem';
-  if (!fs.existsSync(keyPath)) {
+  if (!existsSync(keyPath)) {
     throw new Error(`Real IDP key not found at ${keyPath}. Run setup scripts first.`);
   }
   
-  const key = fs.readFileSync(keyPath, 'utf8');
+  const key = readFileSync(keyPath, 'utf8');
   return { kid: '6ca1a309a735fb83', key };
 }
 

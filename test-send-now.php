@@ -124,7 +124,7 @@ class MailServiceClient {
 $config = [
     'mailServiceUrl' => 'http://localhost:3100',
     'appId' => 'cmfka688r0001b77ofpgm57ix',
-    'clientSecret' => 'lkbuqj5+Tb0H0tMC/5773YAWrB+NiytiH4g1gFo+Ycc=', // Replace with your actual client secret
+    'clientSecret' => 'bXwMxsX40R47QaZLA0oK3t1yDH+Y/cS/+X0Bu55jjN8=', // Replace with your actual client secret
 ];
 
 // Initialize the mail client

@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import crypto from 'crypto';
+import { randomBytes } from 'crypto';
 
 /**
  * Security utilities for managing client secrets
@@ -12,7 +12,7 @@ const SALT_ROUNDS = 12;
  */
 export function generateClientSecret(): string {
   // Generate a 32-byte random string and encode as base64
-  return crypto.randomBytes(32).toString('base64');
+  return randomBytes(32).toString('base64');
 }
 
 /**

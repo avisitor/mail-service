@@ -1,29 +1,63 @@
 import { getPrisma } from '../../db/prisma.js';
 import { sendEmail } from '../../providers/smtp.js';
 import { processEmailTemplate, RecipientContext } from '../../utils/templates.js';
+import { getBatchConfig, globalRateTracker, sleep } from '../../config/batch.js';
 
 export interface WorkerResult {
   jobsProcessed: number;
   jobsSent: number;
   jobsFailed: number;
+  jobsRateLimited: number;
   errors: string[];
 }
 
 /**
- * Main worker function that processes pending and scheduled email jobs
- * @param limitJobs Maximum number of jobs to process in this tick
- * @param batchSize Maximum number of emails to send in parallel
+ * Main worker function that processes pending and scheduled email jobs with configurable batching
+ * @param limitJobs Maximum number of jobs to process in this tick (defaults to config or 50)
  */
-export async function workerTick(limitJobs = 50, batchSize = 10): Promise<WorkerResult> {
+export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
+  const batchConfig = getBatchConfig();
+  const effectiveLimitJobs = limitJobs || Math.min(50, batchConfig.batchSize * 5); // Process up to 5 batches worth
+  
   const prisma = getPrisma();
   const result: WorkerResult = {
     jobsProcessed: 0,
     jobsSent: 0,
     jobsFailed: 0,
+    jobsRateLimited: 0,
     errors: []
   };
 
+  console.log('[Worker] Starting tick with config:', {
+    batchSize: batchConfig.batchSize,
+    interBatchDelayMs: batchConfig.interBatchDelayMs,
+    maxEmailsPerHour: batchConfig.maxEmailsPerHour,
+    maxEmailsPerDay: batchConfig.maxEmailsPerDay,
+    limitJobs: effectiveLimitJobs
+  });
+
   try {
+    // Check global rate limits before processing
+    const remainingHourly = globalRateTracker.getRemainingHourly(batchConfig.maxEmailsPerHour);
+    const remainingDaily = globalRateTracker.getRemainingDaily(batchConfig.maxEmailsPerDay);
+    
+    if (remainingHourly <= 0) {
+      console.log('[Worker] Hourly rate limit reached, skipping tick');
+      return result;
+    }
+    
+    if (remainingDaily <= 0) {
+      console.log('[Worker] Daily rate limit reached, skipping tick');
+      return result;
+    }
+
+    // Limit jobs to respect rate limits
+    const maxJobsToProcess = Math.min(
+      effectiveLimitJobs,
+      remainingHourly,
+      remainingDaily
+    );
+
     // Find jobs ready to be processed
     const jobs = await prisma.emailJob.findMany({
       where: {
@@ -38,35 +72,56 @@ export async function workerTick(limitJobs = 50, batchSize = 10): Promise<Worker
         { scheduledAt: 'asc' }, // Send immediate jobs first, then by schedule
         { createdAt: 'asc' }
       ],
-      take: limitJobs
+      take: maxJobsToProcess
     });
 
     if (jobs.length === 0) {
+      console.log('[Worker] No jobs to process');
       return result;
     }
 
-    // Process jobs in batches to avoid overwhelming SMTP servers
-    for (let i = 0; i < jobs.length; i += batchSize) {
-      const batch = jobs.slice(i, i + batchSize);
+    console.log(`[Worker] Processing ${jobs.length} jobs in batches of ${batchConfig.batchSize}`);
+
+    // Process jobs in batches with configurable delays
+    for (let i = 0; i < jobs.length; i += batchConfig.batchSize) {
+      const batch = jobs.slice(i, i + batchConfig.batchSize);
+      
+      // Check rate limits before each batch
+      if (!globalRateTracker.checkHourlyLimit(batchConfig.maxEmailsPerHour) || 
+          !globalRateTracker.checkDailyLimit(batchConfig.maxEmailsPerDay)) {
+        console.log(`[Worker] Rate limit reached after processing ${i} jobs`);
+        result.jobsRateLimited = jobs.length - i;
+        break;
+      }
+      
+      console.log(`[Worker] Processing batch ${Math.floor(i / batchConfig.batchSize) + 1} with ${batch.length} jobs`);
       
       // Process batch in parallel
       const batchPromises = batch.map(job => processJob(job));
       const batchResults = await Promise.allSettled(batchPromises);
       
-      // Update results
+      // Update results and rate counters
       batchResults.forEach((promiseResult, index) => {
         const job = batch[index];
         result.jobsProcessed++;
         
         if (promiseResult.status === 'fulfilled') {
           result.jobsSent++;
+          globalRateTracker.incrementCounters(); // Track successful sends for rate limiting
         } else {
           result.jobsFailed++;
           result.errors.push(`Job ${job.jobId}: ${promiseResult.reason?.message || 'Unknown error'}`);
         }
       });
+
+      // Inter-batch delay (for anti-spam batching)
+      if (batchConfig.interBatchDelayMs > 0 && i + batchConfig.batchSize < jobs.length) {
+        console.log(`[Worker] Waiting ${batchConfig.interBatchDelayMs}ms before next batch...`);
+        await sleep(batchConfig.interBatchDelayMs);
+      }
     }
 
+    console.log(`[Worker] Completed tick: ${result.jobsProcessed} processed, ${result.jobsSent} sent, ${result.jobsFailed} failed, ${result.jobsRateLimited} rate limited`);
     return result;
   } catch (error: any) {
     result.errors.push(`Worker tick failed: ${error.message}`);
