@@ -158,20 +158,21 @@ export async function sendEmail(input: SendEmailInput) {
   let fromAddr: string;
   let fromName: string | undefined;
 
-  if (input.testEmail && config.testSmtp.enabled) {
-    // Use test SMTP configuration
+  if (input.testEmail) {
+    // Force MailHog configuration when testEmail flag is true
+    // This ensures ALL testEmail=true requests go to MailHog regardless of environment config
     transporter = nodemailer.createTransport({
-      host: config.testSmtp.host,
-      port: config.testSmtp.port,
-      secure: config.testSmtp.secure,
-      auth: (config.testSmtp.user && config.testSmtp.pass) ? {
+      host: config.testSmtp.enabled ? config.testSmtp.host : 'localhost',
+      port: config.testSmtp.enabled ? config.testSmtp.port : 1025,
+      secure: config.testSmtp.enabled ? config.testSmtp.secure : false,
+      auth: (config.testSmtp.enabled && config.testSmtp.user && config.testSmtp.pass) ? {
         user: config.testSmtp.user,
         pass: config.testSmtp.pass
       } : undefined,
     });
     
-    fromAddr = config.testSmtp.fromDefault;
-    fromName = config.testSmtp.fromName;
+    fromAddr = config.testSmtp.enabled ? config.testSmtp.fromDefault : 'test@example.com';
+    fromName = config.testSmtp.enabled ? config.testSmtp.fromName : 'Mail Service Test';
   } else {
     // Use resolved application/tenant SMTP configuration
     transporter = await getTransporterAsync(input.tenantId, input.appId);
