@@ -824,6 +824,28 @@ export function buildApp() {
     }
   });
 
+  // MailHog verification endpoint to check received messages (bypasses CORS issues)
+  app.get('/api/mailhog/messages', async (req, reply) => {
+    try {
+      const response = await fetch('http://localhost:8025/api/v1/messages');
+      if (!response.ok) {
+        return reply.code(502).send({ 
+          error: 'MailHog not available', 
+          details: `HTTP ${response.status}`,
+          suggestion: 'Ensure MailHog is running at http://localhost:8025' 
+        });
+      }
+      const data = await response.json();
+      return data;
+    } catch (error: any) {
+      return reply.code(502).send({ 
+        error: 'Cannot connect to MailHog', 
+        details: error.message,
+        suggestion: 'Ensure MailHog is running at http://localhost:8025' 
+      });
+    }
+  });
+
   // Convenience bulk send (unauthenticated if auth disabled): create an ad-hoc group and immediately process via worker.
   // Payload: { appId, templateId?, subject, html?, text?, recipients: [ { email, name?, context? } ], testEmail? }
   app.post('/send-now', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
@@ -937,7 +959,8 @@ export function buildApp() {
         senderName,
         senderEmail,
         host,
-        username
+        username,
+        testEmail // Pass testEmail flag to worker
       });
       
       // If not scheduled, trigger worker to process immediately
