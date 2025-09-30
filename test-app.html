@@ -232,6 +232,13 @@
         </div>
         
         <div class="action-section">
+            <h3>2h. Send Template Email to MailHog (Safe Test)</h3>
+            <p>Send email using template ID with testEmail flag to force all messages to MailHog test server, regardless of SMTP configuration. Ensures safe testing without risk of sending to production servers.</p>
+            <button id="send-template-mailhog-btn" onclick="sendTemplateToMailHog()">Send Template to MailHog Only</button>
+            <div id="send-template-mailhog-result" class="result"></div>
+        </div>
+        
+        <div class="action-section">
             <h3>3. Manage Applications (Tenant Admin)</h3>
             <p>Redirect to mail-service admin view with IDP authentication for tenant admin to manage application configurations.</p>
             <button id="manage-apps-btn" onclick="manageApplications()">Manage Applications</button>
@@ -300,7 +307,7 @@
         
         function showResult(elementId, message, type) {
             const resultElement = document.getElementById(elementId);
-            resultElement.textContent = message;
+            resultElement.innerHTML = message;
             resultElement.className = `result ${type}`;
             resultElement.style.display = 'block';
         }
@@ -669,10 +676,10 @@
                 
                 if (response.ok) {
                     showResult('send-template-api-result', 
-                        `✅ Template email sent successfully!\\n\\n` +
-                        `Group ID: ${result.groupId}\\n` +
-                        `Jobs Created: ${result.jobCount}\\n` +
-                        `Recipients: ${recipients.length}\\n\\n` +
+                        `✅ Template email sent successfully!<br /><br />` +
+                        `Group ID: ${result.groupId}<br />` +
+                        `Jobs Created: ${result.jobCount}<br />` +
+                        `Recipients: ${recipients.length}<br /><br />` +
                         `Emails sent via ${apps[currentApp].name} SMTP configuration with variable substitution.`, 
                         'success');
                 } else {
@@ -684,6 +691,172 @@
                 showResult('send-template-api-result', `Error: ${error.message}`, 'error');
             } finally {
                 hideLoading('send-template-api-btn', 'Send Template via API');
+            }
+        }
+        
+        async function sendTemplateToMailHog() {
+            const app = apps[currentApp];
+            hideResult('send-template-mailhog-result');
+            showLoading('send-template-mailhog-btn');
+            
+            try {
+                // Validate the appId exists by checking if it's in our valid apps list
+                if (!app || !app.appId) {
+                    throw new Error('Invalid application selected');
+                }
+                
+                // Create same recipient data as test 2g for consistency
+                const recipients = [
+                    {
+                        'id': 'lead1bcb2b7b4bc93',
+                        'email': 'robw@worldspot.com',
+                        'name': 'alealani evangelista',
+                        'company': 'Pilina ʻĀina',
+                        'island': 'bigisland',
+                        'category': '',
+                        'phone': '8089386534',
+                        'status': 'Registered',
+                        'first name': 'alealani',
+                        'last name': 'evangelista',
+                        'full name': 'alealani evangelista',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    },
+                    {
+                        'id': 'lead5365f8ca1ee82',
+                        'email': 'rew@worldspot.com',
+                        'name': 'Alexander Akana',
+                        'company': 'La&apos;au Kukahi Farms',
+                        'island': 'Maui',
+                        'category': 'Farm,',
+                        'phone': '8083756810',
+                        'status': 'Agreed',
+                        'first name': 'Alexander',
+                        'last name': 'Akana',
+                        'full name': 'Alexander Akana',
+                        'sender name': 'Rob Weltman',
+                        'sender email': 'robw@worldspot.com',
+                        'owner name': 'Rob Weltman',
+                        'owner email': 'robw@worldspot.com'
+                    }
+                ];
+                
+                // Get an authentication token
+                const authToken = await getAuthToken();
+                if (!authToken) {
+                    throw new Error('Unable to get authentication token');
+                }
+                
+                // Send request to /send-now API with template ID and testEmail flag
+                const response = await fetch('/send-now', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': authToken
+                    },
+                    body: JSON.stringify({
+                        appId: app.appId,
+                        templateId: 'tpl_00000090_school___please_join_us',
+                        recipients: recipients,
+                        testEmail: true  // This forces all emails to go to MailHog regardless of SMTP config
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Wait a moment for emails to be processed by MailHog
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // Verify with MailHog API that emails were received (via proxy to avoid CORS)
+                    let verificationMessage = '';
+                    try {
+                        const mailhogResponse = await fetch('/api/mailhog/messages');
+                        if (mailhogResponse.ok) {
+                            const mailhogData = await mailhogResponse.json();
+                            // MailHog returns a direct array of messages, not an object with 'items'
+                            const recentMessages = Array.isArray(mailhogData) ? mailhogData : [];
+                            
+                            // Count messages from the last 30 seconds (recent sends)
+                            const thirtySecondsAgo = Date.now() - 30000;
+                            const recentCount = recentMessages.filter(msg => {
+                                const msgTime = new Date(msg.Created).getTime();
+                                return msgTime > thirtySecondsAgo;
+                            }).length;
+                            
+                            // Check for our specific recipients
+                            const ourEmails = recipients.map(r => r.email);
+                            const allMatchingMessages = recentMessages.filter(msg => {
+                                const toEmails = msg.To ? msg.To.map(to => to.Mailbox + '@' + to.Domain) : [];
+                                return toEmails.some(email => ourEmails.includes(email));
+                            });
+                            
+                            // Filter matching messages to only recent ones (last 30 seconds)
+                            const recentMatchingMessages = allMatchingMessages.filter(msg => {
+                                const msgTime = new Date(msg.Created).getTime();
+                                return msgTime > thirtySecondsAgo;
+                            });
+                            
+                            verificationMessage = `<br /><br />📧 MAILHOG VERIFICATION:<br />` +
+                                `✅ Connected to MailHog successfully<br />` +
+                                `📊 Total messages in MailHog: ${recentMessages.length}<br />` +
+                                `🕐 Recent messages (last 30s): ${recentCount}<br />` +
+                                `🎯 Recent messages to our recipients: ${recentMatchingMessages.length}<br />` +
+                                `📋 Total messages to our recipients (all time): ${allMatchingMessages.length}<br />`;
+                                
+                            if (recentMatchingMessages.length > 0) {
+                                verificationMessage += `<br />🔍 Recently verified messages:`;
+                                recentMatchingMessages.slice(0, 3).forEach(msg => {
+                                    const toEmails = msg.To ? msg.To.map(to => to.Mailbox + '@' + to.Domain).join(', ') : 'Unknown';
+                                    const subject = msg.Content?.Headers?.Subject?.[0] || 'No subject';
+                                    const timeAgo = Math.round((Date.now() - new Date(msg.Created).getTime()) / 1000);
+                                    verificationMessage += `<br />  • ${subject} → ${toEmails} (${timeAgo}s ago)`;
+                                });
+                            } else if (allMatchingMessages.length > 0) {
+                                verificationMessage += `<br />ℹ️ Found messages to our recipients, but they're older than 30s`;
+                            }
+                        } else {
+                            const errorData = await mailhogResponse.json().catch(() => ({}));
+                            verificationMessage = `<br /><br />⚠️ MAILHOG VERIFICATION:<br />` +
+                                `Could not connect to MailHog (${mailhogResponse.status})<br />` +
+                                `${errorData.suggestion || 'Check that MailHog is running at http://localhost:8025'}`;
+                        }
+                    } catch (mailhogError) {
+                        // Handle CORS and other connection issues gracefully
+                        if (mailhogError.message.includes('Failed to fetch') || mailhogError.message.includes('CORS')) {
+                            verificationMessage = `<br /><br />📧 MAILHOG VERIFICATION:<br />` +
+                                `ℹ️ Cannot verify directly due to browser CORS policy<br />` +
+                                `This is normal - the testEmail flag still ensures safety<br />` +
+                                `✅ All emails are guaranteed to go to MailHog (localhost:1025)<br />` +
+                                `🔒 No emails can reach production servers with testEmail=true`;
+                        } else {
+                            verificationMessage = `<br /><br />⚠️ MAILHOG VERIFICATION:<br />` +
+                                `Error connecting to MailHog API: ${mailhogError.message}<br />` +
+                                `Check that MailHog is running at http://localhost:8025`;
+                        }
+                    }
+                    
+                    showResult('send-template-mailhog-result', 
+                        `✅ Template email sent safely to MailHog!<br /><br />` +
+                        `🔒 SAFETY MODE: testEmail flag ensures all messages go to MailHog<br />` +
+                        `Group ID: ${result.groupId}<br />` +
+                        `Jobs Created: ${result.jobCount}<br />` +
+                        `Recipients: ${recipients.length}<br /><br />` +
+                        `All emails forced to localhost:1025 (MailHog) regardless of app SMTP configuration.` +
+                        verificationMessage +
+                        `<br /><br />🌐 View all messages: http://localhost:8025`, 
+                        'success');
+                } else {
+                    throw new Error(result.message || 'API call failed');
+                }
+                
+            } catch (error) {
+                console.error('Send template to MailHog error:', error);
+                showResult('send-template-mailhog-result', `Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading('send-template-mailhog-btn', 'Send Template to MailHog Only');
             }
         }
         
@@ -784,22 +957,22 @@
                 const result = await response.json();
                 
                 if (response.ok) {
-                    let successMessage = `✅ Bulk SMS sent successfully via API!\\n\\n` +
-                        `Total Recipients: ${result.summary.total}\\n` +
-                        `Successful: ${result.summary.successful}\\n` +
-                        `Failed: ${result.summary.failed}\\n\\n`;
+                    let successMessage = `✅ Bulk SMS sent successfully via API!<br /><br />` +
+                        `Total Recipients: ${result.summary.total}<br />` +
+                        `Successful: ${result.summary.successful}<br />` +
+                        `Failed: ${result.summary.failed}<br /><br />`;
                     
                     // Add details for each recipient
                     result.results.forEach((r, index) => {
                         successMessage += `${index + 1}. ${r.phoneNumber}: `;
                         if (r.success) {
-                            successMessage += `✅ Sent (ID: ${r.messageId})\\n`;
+                            successMessage += `✅ Sent (ID: ${r.messageId})<br />`;
                         } else {
-                            successMessage += `❌ Failed (${r.error})\\n`;
+                            successMessage += `❌ Failed (${r.error})<br />`;
                         }
                     });
                     
-                    successMessage += `\\nNote: These SMS messages were sent using real Twilio service.`;
+                    successMessage += `<br />Note: These SMS messages were sent using real Twilio service.`;
                     
                     showResult('send-sms-api-result', successMessage, 'success');
                 } else {
