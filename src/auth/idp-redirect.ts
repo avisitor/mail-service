@@ -40,20 +40,44 @@ export function createIdpRedirectUrl(options: IdpRedirectOptions): string {
  */
 export async function checkAuthentication(request: any): Promise<{ isAuthenticated: boolean; userContext: any | null }> {
   const authHeader = request.headers?.authorization || request.headers?.Authorization;
+  const tokenParam = request.query?.token;
   
-  if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
-    console.log('[checkAuthentication] No valid auth header found');
-    return { isAuthenticated: false, userContext: null };
+  // Check for Authorization header first
+  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    try {
+      await request.jwtVerify();
+      // Extract user context from the JWT payload using the same logic as the auth middleware
+      const tokenPayload = (request as any).user || {};
+      const { extractUser } = await import('./roles.js');
+      const userContext = await extractUser(tokenPayload);
+      console.log('[checkAuthentication] Authentication successful via header, userContext:', JSON.stringify(userContext, null, 2));
+      console.log('[checkAuthentication] User roles:', userContext?.roles);
+      return { isAuthenticated: true, userContext };
+    } catch (error) {
+      console.log('[checkAuthentication] JWT verification failed for header:', (error as Error).message);
+    }
   }
   
-  try {
-    await request.jwtVerify();
-    // Extract user context after successful verification
-    const userContext = (request as any).userContext;
-    console.log('[checkAuthentication] Authentication successful, userContext:', JSON.stringify(userContext, null, 2));
-    return { isAuthenticated: true, userContext };
-  } catch (error) {
-    console.log('[checkAuthentication] JWT verification failed:', (error as Error).message);
-    return { isAuthenticated: false, userContext: null };
+  // Check for token URL parameter if header auth failed or not present
+  if (tokenParam && typeof tokenParam === 'string') {
+    try {
+      // Temporarily set the Authorization header for verification
+      request.headers.authorization = `Bearer ${tokenParam}`;
+      await request.jwtVerify();
+      // Extract user context from the JWT payload using the same logic as the auth middleware
+      const tokenPayload = (request as any).user || {};
+      const { extractUser } = await import('./roles.js');
+      const userContext = await extractUser(tokenPayload);
+      console.log('[checkAuthentication] Authentication successful via token param, userContext:', JSON.stringify(userContext, null, 2));
+      console.log('[checkAuthentication] User roles:', userContext?.roles);
+      return { isAuthenticated: true, userContext };
+    } catch (error) {
+      console.log('[checkAuthentication] JWT verification failed for token param:', (error as Error).message);
+      // Clean up the temporary header
+      delete request.headers.authorization;
+    }
   }
+  
+  console.log('[checkAuthentication] No valid auth header or token parameter found');
+  return { isAuthenticated: false, userContext: null };
 }
