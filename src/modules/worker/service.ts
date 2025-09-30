@@ -170,9 +170,13 @@ async function processJob(job: any): Promise<void> {
     const subject = job.subject || 'No Subject';
     const html = job.message || undefined;
     
+    // Check if this is a test email by looking for TEST_MODE: prefix in host field
+    const isTestEmail = job.host?.startsWith('TEST_MODE:') || false;
+    
     console.log(`[Worker] Sending email to ${recipient.email}:`, {
       subject: subject,
-      hasHtml: !!html
+      hasHtml: !!html,
+      isTestEmail: isTestEmail
     });
     
     // Send the email and capture delivery result
@@ -181,7 +185,7 @@ async function processJob(job: any): Promise<void> {
       subject: subject,
       html: html,
       appId: job.appId,
-      testEmail: false
+      testEmail: isTestEmail // Use detected test mode
     });
 
     console.log(`[Worker] Email delivery result for job ${job.jobId}:`, {
@@ -254,6 +258,7 @@ export async function createEmailJobs(params: {
   senderEmail?: string;
   host?: string;
   username?: string;
+  testEmail?: boolean; // Add testEmail flag
 }): Promise<{ jobIds: string[], groupId: string }> {
   const prisma = getPrisma();
   const { nanoid } = await import('nanoid');
@@ -284,7 +289,7 @@ export async function createEmailJobs(params: {
       subject: processedSubject, // Store processed subject
       senderName: params.senderName,
       senderEmail: params.senderEmail,
-      host: params.host,
+      host: params.testEmail ? 'TEST_MODE:' + (params.host || 'localhost') : params.host, // Prefix with TEST_MODE: if testEmail
       username: params.username,
       recipients: JSON.stringify([{ email: recipient.email, name: recipient.name }]), // Store only email and name
       message: processedHtml, // Store processed HTML
