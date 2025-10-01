@@ -242,6 +242,27 @@ model Maillog {
   @@index([messageId], map: "idx_messageId")
 }
 
+model Smslog {
+  id           String    @id @default(cuid())
+  messageId    String?   @unique(map: "messageId") @db.VarChar(255)
+  groupId      String?   @db.VarChar(20)
+  appId        String?
+  sent         DateTime? @default(now()) @db.DateTime(0)
+  senderName   String?   @db.VarChar(64)
+  senderPhone  String?   @db.VarChar(32)
+  recipients   String?   @db.MediumText
+  message      String?   @db.MediumText
+  delivered    DateTime? @db.DateTime(0)
+  failed       DateTime? @db.DateTime(0)
+  errorCode    String?   @db.VarChar(32)
+  errorMessage String?   @db.Text
+  createdAt    DateTime? @default(now()) @db.DateTime(0)
+
+  @@index([appId, sent], map: "idx_sms_appId_sent")
+  @@index([groupId], map: "idx_sms_groupId")
+  @@index([messageId], map: "idx_sms_messageId")
+}
+
 enum SmtpConfigScope {
   GLOBAL
   TENANT

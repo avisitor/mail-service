@@ -1,10 +1,8 @@
 // SMS provider using Twilio service
 // @ts-ignore
 import { Twilio } from 'twilio';
-import { PrismaClient, SmsConfigScope } from '@prisma/client';
 import { resolveSmsConfig } from '../modules/sms/service.js';
-
-const prisma = new PrismaClient();
+import { getPrisma } from '../db/prisma.js';
 
 interface SmsConfig {
   accountSid: string;
@@ -26,6 +24,46 @@ interface SmsResult {
   messageId?: string;
   error?: string;
   details?: any;
+}
+
+// Function to log SMS send to database
+async function logSmsToDatabase(params: {
+  messageId?: string;
+  appId?: string;
+  recipients: string;
+  message: string;
+  senderPhone?: string;
+  senderName?: string;
+  delivered?: boolean;
+  failed?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+}): Promise<void> {
+  try {
+    const prisma = getPrisma();
+    
+    await prisma.smslog.create({
+      data: {
+        messageId: params.messageId || null,
+        appId: params.appId || null,
+        recipients: params.recipients,
+        message: params.message,
+        senderPhone: params.senderPhone || null,
+        senderName: params.senderName || null,
+        delivered: params.delivered ? new Date() : null,
+        failed: params.failed ? new Date() : null,
+        errorCode: params.errorCode || null,
+        errorMessage: params.errorMessage || null,
+        sent: new Date(),
+        createdAt: new Date()
+      }
+    });
+    
+    console.log('[SMS] Logged to database:', { messageId: params.messageId, recipients: params.recipients });
+  } catch (error) {
+    console.error('[SMS] Failed to log to database:', error);
+    // Don't throw - logging failure shouldn't break SMS sending
+  }
 }
 
 // Function to get SMS configuration from database
@@ -188,6 +226,11 @@ export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
     }));
   }
   
+  // Get config details for logging
+  const config = await getSmsConfig(tenantId, appId);
+  const senderPhone = config?.fromNumber;
+  const senderName = 'System'; // You could make this configurable
+  
   const results: SmsResult[] = [];
   
   // Send SMS to each recipient individually
@@ -198,6 +241,18 @@ export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
         success: false,
         error: 'Empty phone number'
       });
+      
+      // Log failed send attempt
+      await logSmsToDatabase({
+        appId,
+        recipients: cleanNumber,
+        message,
+        senderPhone,
+        senderName,
+        failed: true,
+        errorMessage: 'Empty phone number'
+      });
+      
       continue;
     }
     
@@ -205,14 +260,39 @@ export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
       const result = await client.sendSms(cleanNumber, message);
       results.push(result);
       
+      // Log successful send
+      await logSmsToDatabase({
+        messageId: result.messageId,
+        appId,
+        recipients: cleanNumber,
+        message,
+        senderPhone,
+        senderName,
+        delivered: result.success,
+        failed: !result.success,
+        errorMessage: result.error
+      });
+      
       // Small delay between messages to avoid rate limiting
       if (to.length > 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     } catch (error) {
-      results.push({
+      const errorResult = {
         success: false,
         error: (error as Error).message
+      };
+      results.push(errorResult);
+      
+      // Log failed send attempt
+      await logSmsToDatabase({
+        appId,
+        recipients: cleanNumber,
+        message,
+        senderPhone,
+        senderName,
+        failed: true,
+        errorMessage: (error as Error).message
       });
     }
   }

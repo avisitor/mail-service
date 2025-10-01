@@ -28,13 +28,13 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
     errors: []
   };
 
-  console.log('[Worker] Starting tick with config:', {
-    batchSize: batchConfig.batchSize,
-    interBatchDelayMs: batchConfig.interBatchDelayMs,
-    maxEmailsPerHour: batchConfig.maxEmailsPerHour,
-    maxEmailsPerDay: batchConfig.maxEmailsPerDay,
-    limitJobs: effectiveLimitJobs
-  });
+  // console.log('[Worker] Starting tick with config:', {
+  //   batchSize: batchConfig.batchSize,
+  //   interBatchDelayMs: batchConfig.interBatchDelayMs,
+  //   maxEmailsPerHour: batchConfig.maxEmailsPerHour,
+  //   maxEmailsPerDay: batchConfig.maxEmailsPerDay,
+  //   limitJobs: effectiveLimitJobs
+  // });
 
   try {
     // Check global rate limits before processing
@@ -76,7 +76,7 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
     });
 
     if (jobs.length === 0) {
-      console.log('[Worker] No jobs to process');
+      // console.log('[Worker] No jobs to process');
       return result;
     }
 

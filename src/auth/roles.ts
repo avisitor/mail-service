@@ -13,8 +13,17 @@ export interface UserContext {
 
 export async function extractUser(payload: any): Promise<UserContext | null> {
   if (!payload) return null;
+  
+  // Debug: Log the entire payload and role extraction
+  console.log('[AUTH-DEBUG] extractUser payload:', JSON.stringify(payload, null, 2));
+  console.log('[AUTH-DEBUG] config.auth.roleClaim:', config.auth.roleClaim);
+  
   const roleClaim = payload[config.auth.roleClaim];
+  console.log('[AUTH-DEBUG] roleClaim value:', roleClaim, 'type:', typeof roleClaim);
+  
   const roles: UserRole[] = Array.isArray(roleClaim) ? roleClaim : (typeof roleClaim === 'string' ? roleClaim.split(/[ ,]/).filter(Boolean) : []);
+  console.log('[AUTH-DEBUG] processed roles:', roles);
+  
   let tenantId = payload[config.auth.tenantClaim];
   const appId = payload[config.auth.appClaim];
   

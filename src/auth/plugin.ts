@@ -66,6 +66,17 @@ export default fp(async function authPlugin(app) {
   
   app.decorate('authenticate', async function (request, reply) {
     
+    // DEBUG: Log what tokens we receive
+    const authHeader = request.headers?.authorization || request.headers?.Authorization;
+    const tokenParam = (request.query as any)?.token || (request.params as any)?.token;
+    console.log('[AUTH-PLUGIN-DEBUG] Received tokens:', {
+      hasAuthHeader: !!authHeader,
+      hasTokenParam: !!tokenParam,
+      authHeaderPreview: authHeader ? `${authHeader.substring(0, 30)}...` : 'none',
+      tokenParamPreview: tokenParam ? `${tokenParam.substring(0, 30)}...` : 'none',
+      url: request.url
+    });
+    
     // Check if authentication is disabled
     if (flags.disableAuth) {
       // @ts-ignore
@@ -78,10 +89,10 @@ export default fp(async function authPlugin(app) {
     }
     
     // Check for internal application token manually first
-    const authHeader = request.headers?.authorization || request.headers?.Authorization;
+    const internalAuthHeader = request.headers?.authorization || request.headers?.Authorization;
     
-    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring('Bearer '.length).trim();
+    if (typeof internalAuthHeader === 'string' && internalAuthHeader.startsWith('Bearer ')) {
+      const token = internalAuthHeader.substring('Bearer '.length).trim();
       
       try {
         // Try to verify as internal token manually
@@ -108,6 +119,8 @@ export default fp(async function authPlugin(app) {
       
       // Check if this is an internal application token from fastify-jwt
       const payload = request.user as any;
+      console.log('[AUTH-PLUGIN-DEBUG] Payload after jwtVerify():', JSON.stringify(payload, null, 2));
+      
       if (payload && payload.sub?.startsWith('app:')) {
         // @ts-ignore
         request.userContext = {

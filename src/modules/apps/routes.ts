@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getPrisma } from '../../db/prisma.js';
 import { AuthService } from '../../auth/service.js';
+import { checkAuthentication } from '../../auth/idp-redirect.js';
 import { customAlphabet } from 'nanoid';
 import { generateClientSecret, hashClientSecret, maskClientSecret } from '../../security/secrets.js';
 
@@ -34,8 +35,18 @@ export async function registerAppRoutes(app: FastifyInstance) {
   });
 
   app.get('/apps', async (req, reply) => {
-    const userContext = await AuthService.requireRole(req, reply, ['tenant_admin', 'superadmin']);
-    if (!userContext) return; // Response already sent
+    // Use checkAuthentication to handle JWT tokens from URL params or headers
+    const { isAuthenticated, userContext } = await checkAuthentication(req);
+    
+    if (!isAuthenticated || !userContext) {
+      return reply.code(401).send({ error: 'Authentication required' });
+    }
+    
+    // Check if user has admin permissions
+    const hasAdminRole = userContext.roles?.includes('tenant_admin') || userContext.roles?.includes('superadmin');
+    if (!hasAdminRole) {
+      return reply.code(403).send({ error: 'Insufficient permissions' });
+    }
 
     const tenantId = (req.query as any)?.tenantId as string | undefined;
     

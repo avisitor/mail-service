@@ -55,13 +55,16 @@ class ViewRegistry {
   }
 
   async showView(viewName: string, userRoles: string[] = []): Promise<void> {
+    console.log(`[ViewRegistry] Attempting to show view: ${viewName} with roles:`, userRoles);
     const view = this.views.get(viewName);
     if (!view) {
       console.warn(`[ViewRegistry] View not found: ${viewName}`);
       return;
     }
 
-    if (!view.canAccess(userRoles)) {
+    const canAccess = view.canAccess(userRoles);
+    console.log(`[ViewRegistry] Access check for ${viewName}: ${canAccess} (roles: ${userRoles.join(', ')})`);
+    if (!canAccess) {
       console.warn(`[ViewRegistry] Access denied to view: ${viewName}`);
       return;
     }
@@ -1745,14 +1748,8 @@ class SmsComposeView implements IView {
       // Clear form after successful send
       this.clearForm();
       
-      // Return to caller if returnUrl is provided
-      const urlParams = new URLSearchParams(window.location.search);
-      const returnUrl = urlParams.get('returnUrl');
-      if (returnUrl) {
-        setTimeout(() => {
-          window.location.href = decodeURIComponent(returnUrl);
-        }, 1000);
-      }
+      // Return to calling app after successful send (same as email compose)
+      returnToCallingAppFromCompose();
       
     } catch (error) {
       console.error('[SmsComposeView] Failed to send SMS:', error);
@@ -2083,6 +2080,8 @@ class EmailLogsView implements IView {
   private totalLogs = 0;
   private currentAppFilter = '';
   private currentSearch = '';
+  private sortField = 'sent';
+  private sortOrder: 'asc' | 'desc' = 'desc';
 
   constructor() {
     registerView(this);
@@ -2115,6 +2114,20 @@ class EmailLogsView implements IView {
     }
     if (prevBtn) prevBtn.addEventListener('click', () => this.prevPage());
     if (nextBtn) nextBtn.addEventListener('click', () => this.nextPage());
+    
+    // Add column header click listeners for sorting
+    const sortableHeaders = ['emailLogsSortDate', 'emailLogsSortSender', 'emailLogsSortRecipients', 'emailLogsSortSubject'];
+    const sortFields = ['sent', 'senderEmail', 'recipients', 'subject'];
+    
+    sortableHeaders.forEach((headerId, index) => {
+      const header = document.getElementById(headerId);
+      if (header) {
+        header.addEventListener('click', () => this.setSortField(sortFields[index]));
+        console.log(`[EmailLogsView] Added click listener to ${headerId}`);
+      } else {
+        console.warn(`[EmailLogsView] Header element not found: ${headerId}`);
+      }
+    });
   }
 
   async activate(): Promise<void> {
@@ -2130,6 +2143,9 @@ class EmailLogsView implements IView {
     
     // Load apps for filter
     await this.loadAppsFilter();
+    
+    // Initialize sort indicators
+    this.updateSortIndicators();
     
     // Load logs
     await this.loadLogs();
@@ -2222,6 +2238,12 @@ class EmailLogsView implements IView {
 
       if (this.currentAppFilter) params.append('appId', this.currentAppFilter);
       if (this.currentSearch) params.append('search', this.currentSearch);
+      
+      // Add sorting parameter
+      if (this.sortField) {
+        params.append('sortBy', this.sortField);
+        params.append('sortOrder', this.sortOrder);
+      }
 
       const response = await fetch(`/api/logs/email?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -2229,8 +2251,9 @@ class EmailLogsView implements IView {
 
       if (response.ok) {
         const data = await response.json();
-        this.totalLogs = data.total;
-        this.renderLogs(data.logs);
+        // Fix: Use pagination.total instead of data.total
+        this.totalLogs = data.pagination?.total || 0;
+        this.renderLogs(data.logs || []);
         this.updatePagination();
       } else {
         console.error('Failed to load email logs:', response.statusText);
@@ -2260,22 +2283,91 @@ class EmailLogsView implements IView {
 
     if (rowsEl) {
       rowsEl.innerHTML = logs.map(log => {
-        const dateTime = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
-        const sender = `${escapeHtml(log.senderName || 'Unknown')} <${escapeHtml(log.senderEmail || 'unknown@example.com')}>`;
-        const recipients = this.truncateText(formatRecipients(log.recipients || 'N/A'), 50);
-        const subject = this.truncateText(escapeHtml(log.subject || '(No subject)'), 40);
-        const messagePreview = this.truncateText(formatMessage(log.message || 'N/A'), 80);
+        // Fix date/time formatting - use 'sent' field from database
+        const dateTime = log.sent ? new Date(log.sent).toLocaleString() : 'N/A';
+        
+        // Fix sender formatting - show both name and email
+        const senderName = log.senderName || 'Unknown';
+        const senderEmail = log.senderEmail || 'unknown@example.com';
+        const sender = `${escapeHtml(senderName)} &lt;${escapeHtml(senderEmail)}&gt;`;
+        
+        // Fix recipients - handle both email lists and count formats gracefully
+        let recipients = 'N/A';
+        if (log.recipients) {
+          const recipientsStr = log.recipients.trim();
+          
+          // Check if it's a count format like "8 recipients"
+          if (/^\d+\s+recipients?$/i.test(recipientsStr)) {
+            recipients = recipientsStr;
+          } else {
+            // Handle email lists (JSON, comma-separated, or single email)
+            try {
+              const recipientData = JSON.parse(recipientsStr);
+              if (Array.isArray(recipientData)) {
+                recipients = recipientData.map(r => {
+                  if (typeof r === 'object' && r.email) {
+                    return r.name ? `${escapeHtml(r.name)} &lt;${escapeHtml(r.email)}&gt;` : escapeHtml(r.email);
+                  } else if (typeof r === 'string') {
+                    return escapeHtml(r);
+                  }
+                  return escapeHtml(String(r));
+                }).join(', ');
+              } else if (typeof recipientData === 'string') {
+                recipients = escapeHtml(recipientData);
+              } else {
+                recipients = escapeHtml(String(recipientData));
+              }
+            } catch {
+              // Not JSON, treat as comma-separated emails or plain text
+              if (recipientsStr.includes(',')) {
+                // Split by comma and clean each email
+                recipients = recipientsStr.split(',')
+                  .map((email: string) => escapeHtml(email.trim()))
+                  .filter((email: string) => email.length > 0)
+                  .join(', ');
+              } else {
+                recipients = escapeHtml(recipientsStr);
+              }
+            }
+          }
+        }
+        recipients = this.truncateText(recipients, 50);
+        
+        // Fix subject - don't truncate too much, add title for full text
+        const fullSubject = log.subject || '(No subject)';
+        const subject = this.truncateText(escapeHtml(fullSubject), 60);
+        
+        // Fix message preview - extract text from HTML if needed
+        let messagePreview = 'N/A';
+        if (log.message && log.message.trim()) {
+          try {
+            // Strip HTML tags for preview
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = log.message;
+            const textContent = (tempDiv.textContent || tempDiv.innerText || '').trim();
+            if (textContent) {
+              messagePreview = this.truncateText(escapeHtml(textContent), 100);
+            } else {
+              messagePreview = 'HTML content (no text)';
+            }
+          } catch (e) {
+            messagePreview = 'Message parsing error';
+          }
+        } else {
+          messagePreview = log.message === null ? 'No message content' : 'Empty message';
+        }
 
         return `
-          <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333;">
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${escapeHtml(dateTime)}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${sender}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${recipients}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${subject}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s;" 
-                 onclick="emailLogsView.showLogDetails('${log.id}')"
+          <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333; min-height: 45px;">
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(dateTime)}">${dateTime}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(senderName + ' <' + senderEmail + '>')}">${sender}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(log.recipients || '')}">${recipients}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(fullSubject)}">${subject}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s; overflow: hidden; word-break: break-word;" 
+                 onclick="emailLogsView.showLogDetails('${escapeHtml(log.id)}')"
                  onmouseover="this.style.backgroundColor='#2a2a2a'" 
-                 onmouseout="this.style.backgroundColor='#1a1a1a'">${messagePreview}</div>
+                 onmouseout="this.style.backgroundColor='#1a1a1a'"
+                 title="Click to view full message">${messagePreview}</div>
           </div>
         `;
       }).join('');
@@ -2290,18 +2382,24 @@ class EmailLogsView implements IView {
 
     const start = this.currentPage * this.pageSize + 1;
     const end = Math.min((this.currentPage + 1) * this.pageSize, this.totalLogs);
+    const totalPages = Math.max(1, Math.ceil(this.totalLogs / this.pageSize));
+    const currentPageDisplay = this.currentPage + 1;
 
     if (infoEl) {
       infoEl.textContent = `Showing ${start}-${end} of ${this.totalLogs} email logs`;
     }
 
     if (pageInfoEl) {
-      const totalPages = Math.ceil(this.totalLogs / this.pageSize);
-      pageInfoEl.textContent = `Page ${this.currentPage + 1} of ${totalPages}`;
+      pageInfoEl.textContent = `Page ${currentPageDisplay} of ${totalPages}`;
     }
 
-    if (prevBtn) prevBtn.disabled = this.currentPage === 0;
-    if (nextBtn) nextBtn.disabled = (this.currentPage + 1) * this.pageSize >= this.totalLogs;
+    if (prevBtn) {
+      prevBtn.disabled = this.currentPage === 0;
+    }
+
+    if (nextBtn) {
+      nextBtn.disabled = this.currentPage >= totalPages - 1;
+    }
   }
 
   private prevPage(): void {
@@ -2364,14 +2462,67 @@ class EmailLogsView implements IView {
     const messageEl = document.getElementById('logModalMessage');
 
     if (titleEl) titleEl.textContent = type === 'email' ? 'Email Details' : 'SMS Details';
-    if (messageIdEl) messageIdEl.textContent = log.messageId || 'N/A';
-    if (dateTimeEl) dateTimeEl.textContent = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
-    if (recipientsEl) recipientsEl.innerHTML = formatRecipients(log.recipients || 'N/A');
     
-    // For the modal, show the full message without truncation but still formatted
+    // Fix: Use correct field names from database
+    if (messageIdEl) messageIdEl.textContent = log.messageId || 'N/A';
+    if (dateTimeEl) dateTimeEl.textContent = log.sent ? new Date(log.sent).toLocaleString() : 'N/A';
+    
+    // Fix: Format recipients properly - handle both email lists and count formats
+    if (recipientsEl) {
+      let recipients = 'N/A';
+      if (log.recipients) {
+        const recipientsStr = log.recipients.trim();
+        
+        // Check if it's a count format like "8 recipients"
+        if (/^\d+\s+recipients?$/i.test(recipientsStr)) {
+          recipients = recipientsStr;
+        } else {
+          // Handle email lists (JSON, comma-separated, or single email)
+          try {
+            const recipientData = JSON.parse(recipientsStr);
+            if (Array.isArray(recipientData)) {
+              recipients = recipientData.map(r => {
+                if (typeof r === 'object' && r.email) {
+                  return r.name ? `${escapeHtml(r.name)} &lt;${escapeHtml(r.email)}&gt;` : escapeHtml(r.email);
+                } else if (typeof r === 'string') {
+                  return escapeHtml(r);
+                }
+                return escapeHtml(String(r));
+              }).join('<br>');
+            } else if (typeof recipientData === 'string') {
+              recipients = escapeHtml(recipientData);
+            } else {
+              recipients = escapeHtml(String(recipientData));
+            }
+          } catch {
+            // Not JSON, treat as comma-separated emails or plain text
+            if (recipientsStr.includes(',')) {
+              // Split by comma and clean each email, show each on new line
+              recipients = recipientsStr.split(',')
+                .map((email: string) => escapeHtml(email.trim()))
+                .filter((email: string) => email.length > 0)
+                .join('<br>');
+            } else {
+              recipients = escapeHtml(recipientsStr);
+            }
+          }
+        }
+      }
+      recipientsEl.innerHTML = recipients;
+    }
+    
+    // Fix: Format message properly without N/A fallback
     if (messageEl) {
-      const fullMessage = formatMessageForModal(log.message || 'N/A');
-      messageEl.innerHTML = fullMessage;
+      if (log.message) {
+        // Keep HTML formatting if it's HTML, otherwise treat as plain text
+        if (log.message.includes('<')) {
+          messageEl.innerHTML = log.message;
+        } else {
+          messageEl.textContent = log.message;
+        }
+      } else {
+        messageEl.textContent = 'No message content available';
+      }
     }
 
     if (type === 'email') {
@@ -2394,6 +2545,44 @@ class EmailLogsView implements IView {
 
     if (modal) modal.style.display = 'flex';
   }
+
+  private setSortField(field: string): void {
+    if (this.sortField === field) {
+      // Toggle sort order if same field
+      this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      // New field, default to descending
+      this.sortField = field;
+      this.sortOrder = 'desc';
+    }
+    this.updateSortIndicators();
+    this.currentPage = 0;
+    this.loadLogs();
+  }
+
+  private updateSortIndicators(): void {
+    // Clear all indicators
+    ['emailLogsSortDate', 'emailLogsSortSender', 'emailLogsSortRecipients', 'emailLogsSortSubject'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = el.innerHTML.replace(/ [↑↓]/g, '');
+      }
+    });
+    
+    // Add indicator to current sort field
+    const fieldMap: {[key: string]: string} = {
+      'sent': 'emailLogsSortDate',
+      'senderEmail': 'emailLogsSortSender', 
+      'recipients': 'emailLogsSortRecipients',
+      'subject': 'emailLogsSortSubject'
+    };
+    
+    const currentEl = document.getElementById(fieldMap[this.sortField]);
+    if (currentEl) {
+      const indicator = this.sortOrder === 'asc' ? ' ↑' : ' ↓';
+      currentEl.innerHTML = currentEl.innerHTML.replace(/ [↑↓]/g, '') + indicator;
+    }
+  }
 }
 
 class SmsLogsView implements IView {
@@ -2404,6 +2593,8 @@ class SmsLogsView implements IView {
   private totalLogs = 0;
   private currentAppFilter = '';
   private currentSearch = '';
+  private sortField = 'sent';
+  private sortOrder: 'asc' | 'desc' = 'desc';
 
   constructor() {
     registerView(this);
@@ -2436,6 +2627,20 @@ class SmsLogsView implements IView {
     }
     if (prevBtn) prevBtn.addEventListener('click', () => this.prevPage());
     if (nextBtn) nextBtn.addEventListener('click', () => this.nextPage());
+    
+    // Add column header click listeners for sorting
+    const sortableHeaders = ['smsLogsSortDate', 'smsLogsSortSender', 'smsLogsSortRecipient', 'smsLogsSortStatus'];
+    const sortFields = ['sent', 'senderPhone', 'recipients', 'delivered'];
+    
+    sortableHeaders.forEach((headerId, index) => {
+      const header = document.getElementById(headerId);
+      if (header) {
+        header.addEventListener('click', () => this.setSortField(sortFields[index]));
+        console.log(`[SmsLogsView] Added click listener to ${headerId}`);
+      } else {
+        console.warn(`[SmsLogsView] Header element not found: ${headerId}`);
+      }
+    });
   }
 
   async activate(): Promise<void> {
@@ -2451,6 +2656,9 @@ class SmsLogsView implements IView {
     
     // Load apps for filter
     await this.loadAppsFilter();
+    
+    // Initialize sort indicators
+    this.updateSortIndicators();
     
     // Load logs
     await this.loadLogs();
@@ -2543,6 +2751,12 @@ class SmsLogsView implements IView {
 
       if (this.currentAppFilter) params.append('appId', this.currentAppFilter);
       if (this.currentSearch) params.append('search', this.currentSearch);
+      
+      // Add sorting parameters
+      if (this.sortField) {
+        params.append('sortBy', this.sortField);
+        params.append('sortOrder', this.sortOrder);
+      }
 
       const response = await fetch(`/api/logs/sms?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -2550,8 +2764,9 @@ class SmsLogsView implements IView {
 
       if (response.ok) {
         const data = await response.json();
-        this.totalLogs = data.total;
-        this.renderLogs(data.logs);
+        // Fix: Use pagination.total instead of data.total
+        this.totalLogs = data.pagination?.total || 0;
+        this.renderLogs(data.logs || []);
         this.updatePagination();
       } else {
         console.error('Failed to load SMS logs:', response.statusText);
@@ -2581,20 +2796,53 @@ class SmsLogsView implements IView {
 
     if (rowsEl) {
       rowsEl.innerHTML = logs.map(log => {
-        const dateTime = log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A';
-        const sender = `${escapeHtml(log.senderName || 'Unknown')} (${escapeHtml(log.senderPhone || 'N/A')})`;
-        const recipients = this.truncateText(formatRecipients(log.recipients || 'N/A'), 50);
-        const messagePreview = this.truncateText(formatMessage(log.message || 'N/A'), 80);
+        // Fix date/time formatting - use 'sent' field from database
+        const dateTime = log.sent ? new Date(log.sent).toLocaleString() : 'N/A';
+        
+        // Fix sender formatting - show both name and phone
+        const senderName = log.senderName || 'Unknown';
+        const senderPhone = log.senderPhone || 'N/A';
+        const sender = `${escapeHtml(senderName)} (${escapeHtml(senderPhone)})`;
+        
+        // Fix recipient display - use recipients field from SMS (may contain multiple recipients)
+        const recipients = log.recipients ? formatRecipients(log.recipients) : 'N/A';
+        const recipient = this.truncateText(recipients, 50);
+        
+        // Fix message preview - extract text content properly
+        let messagePreview = 'N/A';
+        if (log.message && log.message.trim()) {
+          const textContent = (log.message || '').trim();
+          if (textContent) {
+            messagePreview = this.truncateText(escapeHtml(textContent), 100);
+          } else {
+            messagePreview = 'Empty message';
+          }
+        } else {
+          messagePreview = log.message === null ? 'No message content' : 'Empty message';
+        }
+        
+        // Add status indicator
+        let statusColor = '#6c757d';
+        let statusText = 'Sent';
+        if (log.delivered) {
+          statusColor = '#28a745';
+          statusText = '✓ Delivered';
+        } else if (log.failed) {
+          statusColor = '#dc3545';
+          statusText = '✗ Failed';
+        }
 
         return `
-          <div style="display: grid; grid-template-columns: 1fr 1.5fr 2fr 4fr; gap: 1px; background: #333;">
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${escapeHtml(dateTime)}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${sender}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333;">${recipients}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s;" 
-                 onclick="smsLogsView.showLogDetails('${log.id}')"
+          <div style="display: grid; grid-template-columns: 1fr 2fr 1.5fr 1fr 3fr; gap: 1px; background: #333; min-height: 45px;">
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(dateTime)}">${dateTime}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(senderName + ' (' + senderPhone + ')')}">${sender}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(log.recipients || '')}">${recipient}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: ${statusColor}; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word; font-weight: bold;" title="Message status">${statusText}</div>
+            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s; overflow: hidden; word-break: break-word;" 
+                 onclick="smsLogsView.showLogDetails('${escapeHtml(log.id)}')"
                  onmouseover="this.style.backgroundColor='#2a2a2a'" 
-                 onmouseout="this.style.backgroundColor='#1a1a1a'">${messagePreview}</div>
+                 onmouseout="this.style.backgroundColor='#1a1a1a'"
+                 title="Click to view full message">${messagePreview}</div>
           </div>
         `;
       }).join('');
@@ -2646,6 +2894,44 @@ class SmsLogsView implements IView {
     const container = document.getElementById('smsLogsContainer');
     if (container) {
       container.innerHTML = `<div style="padding: 40px; text-align: center; color: #f44336;">${message}</div>`;
+    }
+  }
+
+  private setSortField(field: string): void {
+    if (this.sortField === field) {
+      // Toggle sort order if same field
+      this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      // New field, default to descending
+      this.sortField = field;
+      this.sortOrder = 'desc';
+    }
+    this.updateSortIndicators();
+    this.currentPage = 0;
+    this.loadLogs();
+  }
+
+  private updateSortIndicators(): void {
+    // Clear all indicators
+    ['smsLogsSortDate', 'smsLogsSortSender', 'smsLogsSortRecipient', 'smsLogsSortStatus'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = el.innerHTML.replace(/ [↑↓]/g, '');
+      }
+    });
+    
+    // Add indicator to current sort field
+    const fieldMap: {[key: string]: string} = {
+      'sent': 'smsLogsSortDate',
+      'senderPhone': 'smsLogsSortSender', 
+      'recipients': 'smsLogsSortRecipient',
+      'delivered': 'smsLogsSortStatus'
+    };
+    
+    const currentEl = document.getElementById(fieldMap[this.sortField]);
+    if (currentEl) {
+      const indicator = this.sortOrder === 'asc' ? ' ↑' : ' ↓';
+      currentEl.innerHTML = currentEl.innerHTML.replace(/ [↑↓]/g, '') + indicator;
     }
   }
 
@@ -2835,16 +3121,33 @@ class TinyMCEManager {
 
 async function api(path: string, opts: RequestInit = {}) {
   const headers: Record<string,string> = { 'Content-Type':'application/json', ...(opts.headers as any || {}) };
-  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
   
-  // Debug logging for API calls
-  console.log('[api]', path, {
-    hasAuthToken: !!authToken,
-    hasAuthHeader: !!headers['Authorization'],
-    method: opts.method || 'GET'
-  });
+  // Add authorization header if we have a token
+  if (authToken) {
+    headers['Authorization'] = 'Bearer ' + authToken;
+    // Debug token usage
+    try {
+      const tokenPayload = JSON.parse(atob(authToken.split('.')[1]));
+      console.debug(`[api] Using token for ${path}:`, {
+        iat: tokenPayload.iat,
+        hasRoles: !!tokenPayload.roles,
+        rolesCount: tokenPayload.roles?.length || 0,
+        sub: tokenPayload.sub,
+        tokenStart: authToken.substring(0, 20) + '...'
+      });
+    } catch (e) {
+      console.debug(`[api] Using token for ${path} (parse failed):`, { tokenStart: authToken.substring(0, 20) + '...' });
+    }
+  }
   
-  const res = await fetch(path, { ...opts, headers });
+  // Also add token as URL parameter to support enhanced authentication
+  let finalPath = path;
+  if (authToken) {
+    const separator = path.includes('?') ? '&' : '?';
+    finalPath = `${path}${separator}token=${encodeURIComponent(authToken)}`;
+  }
+  
+  const res = await fetch(finalPath, { ...opts, headers });
   if (!res.ok) {
     // Handle 401 Unauthorized by redirecting to IDP
     if (res.status === 401) {
@@ -3223,7 +3526,8 @@ function applyRoleVisibility() {
 function onAuthenticated(cameFromIdp: boolean = false) {
   console.log('[DEBUG] onAuthenticated called with cameFromIdp:', cameFromIdp);
   
-  // If coming from IDP, restore URL parameters that were saved before redirect
+  // Only restore URL parameters if we actually have saved ones from a real IDP redirect
+  // If someone comes directly with a token and URL parameters, preserve those instead
   if (cameFromIdp) {
     try {
       const savedParams = localStorage.getItem('preIdpUrlParams');
@@ -3246,6 +3550,8 @@ function onAuthenticated(cameFromIdp: boolean = false) {
         localStorage.removeItem('preIdpUrlParams');
         
         console.log('[DEBUG] URL restored to:', currentUrl.toString());
+      } else {
+        console.log('[DEBUG] No saved parameters found - user came directly with token and URL parameters');
       }
     } catch (e) {
       console.warn('[DEBUG] Failed to restore URL parameters:', e);
@@ -3390,15 +3696,25 @@ function updateLogoutButton() {
   const urlParams = new URLSearchParams(window.location.search);
   const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
   const currentView = urlParams.get('view');
+  const urlAppId = urlParams.get('appId');
   
-  // Show Return button if:
-  // 1. External log viewing (returnUrl + view=email-logs/sms-logs)
-  // 2. Coming from app (returnUrl exists, indicating app integration)
-  const isExternalLogViewing = returnUrl && (currentView === 'email-logs' || currentView === 'sms-logs');
+  // Check if this is opened as a popup/new window from another app
+  const isPopupWindow = window.opener && window.opener !== window;
+  
+  // Show Dismiss button if:
+  // 1. This is a popup window (opened via window.open)
+  // 2. External log viewing (view=email-logs/sms-logs with appId)
+  const isExternalLogViewing = urlAppId && (currentView === 'email-logs' || currentView === 'sms-logs');
   const isFromApp = returnUrl && !isExternalLogViewing; // Coming from app for compose/other views
   
-  if (isExternalLogViewing || isFromApp) {
-    // Show as "Return" button
+  if (isPopupWindow || isExternalLogViewing) {
+    // Show as "Dismiss" button for popup windows
+    logoutBtn.innerHTML = '✖️ Dismiss';
+    logoutBtn.title = 'Close this window';
+    logoutBtn.style.background = '#6c757d';
+    logoutBtn.style.borderColor = '#6c757d';
+  } else if (isFromApp) {
+    // Show as "Return" button for app integration
     logoutBtn.innerHTML = '↩️ Return';
     logoutBtn.title = 'Return to calling application';
     logoutBtn.style.background = '#28a745';
@@ -3413,9 +3729,21 @@ function updateLogoutButton() {
 }
 
 document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  // Check if we have a return URL - if so, this should be "Return" instead of "Logout"
   const urlParams = new URLSearchParams(window.location.search);
   const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
+  const currentView = urlParams.get('view');
+  const urlAppId = urlParams.get('appId');
+  
+  // Check if this is a popup window or external log viewing
+  const isPopupWindow = window.opener && window.opener !== window;
+  const isExternalLogViewing = urlAppId && (currentView === 'email-logs' || currentView === 'sms-logs');
+  
+  if (isPopupWindow || isExternalLogViewing) {
+    // This is a popup window - just close it
+    console.log('✖️ Dismissing popup window');
+    window.close();
+    return;
+  }
   
   if (returnUrl) {
     // This is a return to the calling app
@@ -4208,7 +4536,7 @@ function showView(view: string) {
   
   // Restrict template editor to tenant admins only
   if (view === 'template-editor' && !isTenantAdmin) {
-    console.log(`[ui-auth] Non-tenant-admin user attempted to access template editor, redirecting to compose`);
+    console.log(`[ui-auth] Non-tenant_admin user attempted to access template editor, redirecting to compose`);
     view = 'compose';
   }
   
@@ -4341,8 +4669,12 @@ async function init() {
   if (clientIdHint) { try { localStorage.setItem('appClientIdHint', clientIdHint); } catch {} }
   if (appIdHint) { try { localStorage.setItem('appIdHint', appIdHint); } catch {} }
   const tokenFromUrl = url.searchParams.get('token');
-  const cameFromIdp = !!tokenFromUrl;
-  console.log('[DEBUG] Token detection - tokenFromUrl:', !!tokenFromUrl, 'cameFromIdp:', cameFromIdp);
+  // Distinguish between coming from IDP vs being called directly from another app
+  // If there are specific view parameters like view=email-logs, this is likely a direct call
+  const hasViewParam = url.searchParams.has('view');
+  const cameFromIdp = !!tokenFromUrl && !hasViewParam;
+  console.log('[DEBUG] Token detection - tokenFromUrl:', !!tokenFromUrl, 'hasViewParam:', hasViewParam, 'cameFromIdp:', cameFromIdp);
+  console.log('[DEBUG] URL token preview:', tokenFromUrl ? tokenFromUrl.substring(0, 50) + '...' : 'none');
   console.log('[DEBUG] Full token details:', {
     hasUrlToken: !!tokenFromUrl,
     tokenLength: tokenFromUrl?.length || 0,
@@ -4351,11 +4683,24 @@ async function init() {
   });
   
   if (tokenFromUrl) {
+    console.log('[DEBUG] Processing URL token - length:', tokenFromUrl.length);
     authToken = tokenFromUrl;
-    localStorage.setItem('authToken', authToken);
+    // Force clear any old tokens first
+    try { localStorage.removeItem('authToken'); } catch {}
+    // Set the new token with immediate verification
+    try { 
+      localStorage.setItem('authToken', authToken);
+      const verifyToken = localStorage.getItem('authToken');
+      console.debug('[ui-auth] token accepted from URL', { 
+        len: tokenFromUrl.length,
+        stored: !!verifyToken,
+        match: verifyToken === tokenFromUrl
+      });
+    } catch (e) {
+      console.error('[ui-auth] Failed to store token:', e);
+    }
     url.searchParams.delete('token');
     history.replaceState({}, '', url.toString());
-    try { console.debug('[ui-auth] token accepted from URL', { len: tokenFromUrl.length }); } catch {}
     // Clear the one-time redirect flag after arriving back from IDP
     try { sessionStorage.removeItem('idpRedirected'); } catch {}
   } else {
@@ -4375,6 +4720,7 @@ async function init() {
     console.debug('[ui-auth] Calling /me with token:', authToken ? `${authToken.substring(0, 20)}...` : 'none');
     state.user = await api('/me'); 
     console.debug('[ui-auth] /me response:', state.user ? 'user found' : 'null response');
+    console.log('[DEBUG] Full /me response:', JSON.stringify(state.user, null, 2));
     
     // If /me returns null but succeeds, auth is disabled
     if (state.user === null) {
@@ -5354,7 +5700,7 @@ async function displayTenantAdminView() {
   const tenantApps = state.apps.filter(app => app.tenantId === tenantId);
   
   let treeHtml = `
-    <div class="tenant-admin-header" style="margin-bottom: 20px; padding: 15px; background: #2d3748; border-radius: 8px; border-left: 4px solid #4CAF50;">
+    <div class="tenant_admin-header" style="margin-bottom: 20px; padding: 15px; background: #2d3748; border-radius: 8px; border-left: 4px solid #4CAF50;">
       <h3 style="margin: 0 0 5px 0; color: #fff;">Tenant: ${escapeHtml(tenantName)}</h3>
       <p style="margin: 0; color: #a0aec0; font-size: 0.9em;">Managing ${tenantApps.length} application(s)</p>
     </div>
@@ -8449,45 +8795,45 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
 // Return to calling application from compose view (for editors)
 function returnToCallingAppFromCompose() {
     const urlParams = new URLSearchParams(window.location.search);
-    const closeOnSuccess = urlParams.get('closeOnSuccess');
     let returnUrl = urlParams.get('returnUrl');
-    
-    // If closeOnSuccess flag is set, close the window instead of redirecting
-    if (closeOnSuccess === 'true') {
-        console.log('[UI] closeOnSuccess flag detected, closing window');
-        try {
-            window.close();
-            // If window.close() doesn't work (e.g., not opened by script), show message
-            setTimeout(() => {
-                alert('You can now close this window.');
-            }, 100);
-        } catch (error) {
-            console.warn('[UI] Could not close window:', error);
-            alert('Email sent successfully! You can now close this window.');
-        }
-        return;
-    }
     
     // If no returnUrl in current URL, try to get it from localStorage (for post-refresh scenarios)
     if (!returnUrl) {
         returnUrl = localStorage.getItem('editorReturnUrl');
     }
     
+    // If there's a returnUrl, this means we were opened from an external app in a new window
+    // The window should close itself (popup behavior)
     if (returnUrl) {
-        console.log('[UI] Returning to calling app:', returnUrl);
-        // Clear the saved returnUrl after using it
-        localStorage.removeItem('editorReturnUrl');
-        window.location.href = returnUrl;
-    } else {
-        console.log('[UI] No returnUrl found, staying in mail service');
-        // For non-editor contexts or missing returnUrl, stay in the app
-        const roles: string[] = state.user?.roles || [];
-        const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+        console.log('[UI] Closing compose window (opened from external app)');
         
-        if (!isEditorOnly) {
-            // Default redirect to apps view for admins
-            showView('apps');
+        // Clear the saved returnUrl
+        localStorage.removeItem('editorReturnUrl');
+        
+        // Close the window
+        try {
+            window.close();
+            // If window.close() doesn't work immediately, show a message
+            setTimeout(() => {
+                if (!window.closed) {
+                    alert('Action completed! You can now close this window.');
+                }
+            }, 100);
+        } catch (error) {
+            console.warn('[UI] Could not close window:', error);
+            alert('Action completed! Please close this window.');
         }
+        return;
+    }
+    
+    // No returnUrl - this is internal mail-service usage, stay in the app
+    console.log('[UI] No returnUrl found, staying in mail service');
+    const roles: string[] = state.user?.roles || [];
+    const isEditorOnly = roles.includes('editor') && !roles.some((r: string)=> r==='tenant_admin' || r==='superadmin');
+    
+    if (!isEditorOnly) {
+        // Default redirect to apps view for admins
+        showView('apps');
     }
 }
 

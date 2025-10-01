@@ -499,10 +499,10 @@
           </div>
           <div id="emailLogsTable" style="display: none;">
             <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333;">
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Date/Time</div>
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Sender</div>
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Recipients</div>
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Subject</div>
+              <div id="emailLogsSortDate" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none;" title="Click to sort by date">Date/Time ↓</div>
+              <div id="emailLogsSortSender" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none;" title="Click to sort by sender">Sender</div>
+              <div id="emailLogsSortRecipients" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none;" title="Click to sort by recipients">Recipients</div>
+              <div id="emailLogsSortSubject" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none;" title="Click to sort by subject">Subject</div>
               <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Message Preview</div>
             </div>
             <div id="emailLogsRows"></div>
@@ -542,10 +542,19 @@
             Loading SMS logs...
           </div>
           <div id="smsLogsTable" style="display: none;">
-            <div style="display: grid; grid-template-columns: 1fr 1.5fr 2fr 4fr; gap: 1px; background: #333;">
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Date/Time</div>
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Sender</div>
-              <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Recipients</div>
+            <div style="display: grid; grid-template-columns: 1fr 2fr 1.5fr 1fr 3fr; gap: 1px; background: #333;">
+              <div id="smsLogsSortDate" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none; transition: background-color 0.2s;" 
+                   onmouseover="this.style.backgroundColor='#3a3a3a'" onmouseout="this.style.backgroundColor='#2a2a2a'"
+                   title="Click to sort by date">Date/Time ↓</div>
+              <div id="smsLogsSortSender" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none; transition: background-color 0.2s;"
+                   onmouseover="this.style.backgroundColor='#3a3a3a'" onmouseout="this.style.backgroundColor='#2a2a2a'"
+                   title="Click to sort by sender">Sender</div>
+              <div id="smsLogsSortRecipient" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none; transition: background-color 0.2s;"
+                   onmouseover="this.style.backgroundColor='#3a3a3a'" onmouseout="this.style.backgroundColor='#2a2a2a'"
+                   title="Click to sort by recipient">Recipient</div>
+              <div id="smsLogsSortStatus" style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784; cursor: pointer; user-select: none; transition: background-color 0.2s;"
+                   onmouseover="this.style.backgroundColor='#3a3a3a'" onmouseout="this.style.backgroundColor='#2a2a2a'"
+                   title="Click to sort by status">Status</div>
               <div style="background: #2a2a2a; padding: 12px; font-weight: bold; color: #81c784;">Message Preview</div>
             </div>
             <div id="smsLogsRows"></div>

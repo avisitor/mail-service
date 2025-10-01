@@ -18,6 +18,7 @@ import { extractUser } from './auth/roles.js';
 import { createIdpRedirectUrl, checkAuthentication } from './auth/idp-redirect.js';
 import { registerTenantRoutes } from './modules/tenants/routes.js';
 import { registerAppRoutes } from './modules/apps/routes.js';
+import { registerLogRoutes } from './modules/logs/routes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
@@ -91,6 +92,7 @@ export function buildApp() {
   registerWebhookRoutes(app);
   registerTenantRoutes(app);
   registerAppRoutes(app);
+  registerLogRoutes(app);
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
@@ -593,7 +595,7 @@ export function buildApp() {
     
     if (isAuthenticated) {
       // Check if user has admin permissions
-      const hasAdminRole = userContext?.roles?.includes('tenant-admin') || userContext?.roles?.includes('superadmin');
+      const hasAdminRole = userContext?.roles?.includes('tenant_admin') || userContext?.roles?.includes('superadmin');
       console.log('[/admin] User roles check - hasAdminRole:', hasAdminRole, 'roles:', userContext?.roles);
       
       if (!hasAdminRole) {
@@ -653,7 +655,7 @@ export function buildApp() {
       // Check if user has admin permissions
       console.log('[/email-logs] User context for role check:', JSON.stringify(userContext, null, 2));
       console.log('[/email-logs] Available roles:', userContext?.roles);
-      const hasAdminRole = userContext?.roles?.includes('tenant-admin') || userContext?.roles?.includes('superadmin');
+      const hasAdminRole = userContext?.roles?.includes('tenant_admin') || userContext?.roles?.includes('superadmin');
       console.log('[/email-logs] Has admin role:', hasAdminRole);
       
       if (!hasAdminRole) {
@@ -710,7 +712,7 @@ export function buildApp() {
       // Check if user has admin permissions
       console.log('[/sms-logs] User context for role check:', JSON.stringify(userContext, null, 2));
       console.log('[/sms-logs] Available roles:', userContext?.roles);
-      const hasAdminRole = userContext?.roles?.includes('tenant-admin') || userContext?.roles?.includes('superadmin');
+      const hasAdminRole = userContext?.roles?.includes('tenant_admin') || userContext?.roles?.includes('superadmin');
       console.log('[/sms-logs] Has admin role:', hasAdminRole);
       
       if (!hasAdminRole) {
@@ -769,7 +771,7 @@ export function buildApp() {
       const { appId } = body;
       
       const claims = {
-        sub: `tenant-admin-test-tenant-1`,
+        sub: `tenant_admin-test-tenant-1`,
         iss: 'https://idp.worldspot.org',  // Use the correct issuer that matches working tokens
         aud: 'mail-service',
         exp: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hour

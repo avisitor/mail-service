@@ -51,7 +51,7 @@ async function debugConfigResolution() {
         console.log(`   AppId: ${config.appId}`);
       }
       if (config.tenantId) {
-        console.log(`   TenantId: ${config.tenantId}`);
+        console.log(`   TenantId: ${config.}`);
       }
       console.log('');
     });
