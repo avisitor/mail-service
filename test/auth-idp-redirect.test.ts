@@ -6,7 +6,10 @@ vi.mock('../src/config.js', () => ({
   config: {
     auth: {
       issuer: 'https://idp.example.com',
-      idpLoginUrl: 'https://idp.example.com/auth'
+      idpLoginUrl: 'https://idp.example.com/auth',
+      roleClaim: 'roles',
+      tenantClaim: 'tenantId',
+      appClaim: 'appId'
     }
   }
 }));
@@ -145,10 +148,10 @@ describe('IDP Redirect Utilities', () => {
 
     it('should return authenticated when JWT verification succeeds', async () => {
       mockRequest.headers.authorization = 'Bearer valid.jwt.token';
-      mockRequest.userContext = {
+      mockRequest.user = {
         sub: 'user@example.com',
-        roles: ['tenant_admin'],
-        tenantId: 'tenant-123'
+        roles: ['tenant_admin'],  // Default role claim key
+        tenantId: 'tenant-123'    // Default tenant claim key
       };
       mockRequest.jwtVerify.mockResolvedValueOnce(undefined);
 
@@ -159,7 +162,8 @@ describe('IDP Redirect Utilities', () => {
         userContext: {
           sub: 'user@example.com',
           roles: ['tenant_admin'],
-          tenantId: 'tenant-123'
+          tenantId: 'tenant-123',
+          appId: undefined
         }
       });
 
@@ -182,7 +186,7 @@ describe('IDP Redirect Utilities', () => {
 
     it('should handle Authorization header with capital A', async () => {
       mockRequest.headers.Authorization = 'Bearer valid.jwt.token';
-      mockRequest.userContext = { sub: 'user@example.com' };
+      mockRequest.user = { sub: 'user@example.com', roles: [] };
       mockRequest.jwtVerify.mockResolvedValueOnce(undefined);
 
       const result = await checkAuthentication(mockRequest);
@@ -192,8 +196,8 @@ describe('IDP Redirect Utilities', () => {
 
     it('should return null userContext when not set after successful verification', async () => {
       mockRequest.headers.authorization = 'Bearer valid.jwt.token';
+      mockRequest.user = {}; // Empty user object - no user context data
       mockRequest.jwtVerify.mockResolvedValueOnce(undefined);
-      // userContext remains null
 
       const result = await checkAuthentication(mockRequest);
 

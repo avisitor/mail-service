@@ -142,9 +142,23 @@ describe('Batched Mail Processing', () => {
     const endTime = Date.now();
     const processingTime = endTime - startTime;
 
+    // Log errors for debugging FIRST
+    console.log('Worker result:', {
+      jobsProcessed: result.jobsProcessed,
+      jobsSent: result.jobsSent,
+      jobsFailed: result.jobsFailed,
+      jobsRateLimited: result.jobsRateLimited,
+      errorCount: result.errors.length
+    });
+    
+    if (result.errors.length > 0) {
+      console.log('Errors:', result.errors);
+    }
+
     // Verify results
     expect(result.jobsProcessed).toBeGreaterThan(0);
     expect(result.jobsSent).toBeGreaterThan(0);
+    
     expect(result.jobsFailed).toBe(0);
     
     // With MAIL_INTER_BATCH_DELAY_MS=100 and MAIL_BATCH_SIZE=3,
@@ -161,6 +175,10 @@ describe('Batched Mail Processing', () => {
     // Set very low hourly limit for testing
     process.env.MAIL_MAX_EMAILS_PER_HOUR = '5';
     process.env.MAIL_BATCH_SIZE = '10';
+
+    // Reset the global rate tracker to ensure clean state
+    const { globalRateTracker } = await import('../src/config/batch.js');
+    globalRateTracker.reset();
 
     const token = createTestToken({
       sub: 'test-rate-limited-user@example.com',
@@ -215,7 +233,9 @@ describe('Batched Mail Processing', () => {
 
     // Test worker processing with rate limiting
     const { workerTick } = await import('../src/modules/worker/service.js');
+    console.log('Starting workerTick for rate limiting test...');
     const result = await workerTick();
+    console.log('workerTick result:', JSON.stringify(result, null, 2));
 
     // Should process maximum 5 jobs due to hourly limit
     expect(result.jobsProcessed).toBeLessThanOrEqual(5);

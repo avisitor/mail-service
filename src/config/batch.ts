@@ -84,6 +84,14 @@ class RateTracker {
     }
     return Math.max(0, maxPerDay - this.dailyCounter.count);
   }
+
+  /**
+   * Reset counters for testing purposes
+   */
+  reset(): void {
+    this.hourlyCounter = { count: 0, resetTime: 0 };
+    this.dailyCounter = { count: 0, resetTime: 0 };
+  }
 }
 
 export const globalRateTracker = new RateTracker();

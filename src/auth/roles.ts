@@ -12,7 +12,7 @@ export interface UserContext {
 }
 
 export async function extractUser(payload: any): Promise<UserContext | null> {
-  if (!payload) return null;
+  if (!payload || !payload.sub) return null;
   
   // Debug: Log the entire payload and role extraction
   console.log('[AUTH-DEBUG] extractUser payload:', JSON.stringify(payload, null, 2));
