@@ -488,7 +488,7 @@ export function buildApp() {
   
   // Compose email route - always redirects to frontend UI which handles authentication
   app.get('/compose', async (req, reply) => {
-    const { appId, returnUrl, recipients } = req.query as any;
+    const { appId, returnUrl, recipients, token } = req.query as any;
     
     // Validate appId is provided and exists in database
     if (!appId) {
@@ -514,7 +514,8 @@ export function buildApp() {
       view: 'compose',
       ...(appId && { appId }),
       ...(returnUrl && { returnUrl }),
-      ...(recipients && { recipients })
+      ...(recipients && { recipients }),
+      ...(token && { token })
     });
     return reply.redirect(`/ui?${composeParams}`);
   });

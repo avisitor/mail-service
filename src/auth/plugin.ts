@@ -7,6 +7,21 @@ import jwt from 'jsonwebtoken';
 
 export default fp(async function authPlugin(app) {
   app.register(fastifyJwt, <FastifyJWTOptions>{
+    extract: (request: any) => {
+      // First check Authorization header
+      const authHeader = request.headers?.authorization || request.headers?.Authorization;
+      if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+        return authHeader.substring('Bearer '.length).trim();
+      }
+      
+      // Then check URL parameters for initial UI loading
+      const tokenParam = (request.query as any)?.token || (request.params as any)?.token;
+      if (tokenParam) {
+        return tokenParam;
+      }
+      
+      return null;
+    },
     secret: async (_request: any, token: any) => {
       const dbg = (process.env.DEBUG_AUTH || '').toLowerCase() === 'true';
       
