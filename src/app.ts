@@ -556,9 +556,12 @@ export function buildApp() {
       return reply.redirect(`/ui?${templateEditorParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern
+      const proto = (req.headers['x-forwarded-proto'] as string) || (req.protocol || 'http');
+      const hostHdr = (req.headers['x-forwarded-host'] as string) || req.headers.host || `localhost:${config.port}`;
+      const host = (hostHdr as string).split(',')[0].trim();
       const finalDestination = `/ui?view=template-editor${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
       const idpUrl = createIdpRedirectUrl({
-        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        returnUrl: `${proto}://${host}${finalDestination}`,
         appId
       });
       
@@ -615,9 +618,12 @@ export function buildApp() {
     } else {
       console.log('[/admin] User not authenticated, redirecting to IDP');
       // User not authenticated, redirect to IDP using the working pattern
+      const proto = (req.headers['x-forwarded-proto'] as string) || (req.protocol || 'http');
+      const hostHdr = (req.headers['x-forwarded-host'] as string) || req.headers.host || `localhost:${config.port}`;
+      const host = (hostHdr as string).split(',')[0].trim();
       const finalDestination = `/ui?view=apps${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
       const idpUrl = createIdpRedirectUrl({
-        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        returnUrl: `${proto}://${host}${finalDestination}`,
         appId
       });
       console.log('[/admin] IDP redirect URL:', idpUrl);
@@ -673,9 +679,12 @@ export function buildApp() {
       return reply.redirect(`/ui?${logsParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern
+      const proto = (req.headers['x-forwarded-proto'] as string) || (req.protocol || 'http');
+      const hostHdr = (req.headers['x-forwarded-host'] as string) || req.headers.host || `localhost:${config.port}`;
+      const host = (hostHdr as string).split(',')[0].trim();
       const finalDestination = `/ui?view=email-logs${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
       const idpUrl = createIdpRedirectUrl({
-        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        returnUrl: `${proto}://${host}${finalDestination}`,
         appId
       });
       
@@ -730,9 +739,12 @@ export function buildApp() {
       return reply.redirect(`/ui?${smsLogsParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern
+      const proto = (req.headers['x-forwarded-proto'] as string) || (req.protocol || 'http');
+      const hostHdr = (req.headers['x-forwarded-host'] as string) || req.headers.host || `localhost:${config.port}`;
+      const host = (hostHdr as string).split(',')[0].trim();
       const finalDestination = `/ui?view=sms-logs${appId ? `&appId=${appId}` : ''}${returnUrl ? `&returnUrl=${encodeURIComponent(returnUrl)}` : ''}`;
       const idpUrl = createIdpRedirectUrl({
-        returnUrl: `${req.protocol}://${req.headers.host}${finalDestination}`,
+        returnUrl: `${proto}://${host}${finalDestination}`,
         appId
       });
       
