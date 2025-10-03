@@ -3169,7 +3169,11 @@ async function api(path: string, opts: RequestInit = {}) {
       // Redirect to IDP
       const idp = uiConfig.idpLoginUrl as string | null;
       if (idp) {
-        const ret = (uiConfig.returnUrl as string) || (window.location.origin + '/ui/');
+        // Preserve current URL for return after re-authentication, but remove the old token
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.delete('token'); // Remove expired token
+        const ret = currentUrl.toString();
+        
         const redirect = new URL(idp);
         redirect.searchParams.set('return', ret);
         redirect.searchParams.set('appId', 'cmfka688r0001b77ofpgm57ix');
