@@ -899,8 +899,17 @@ class ComposeView implements IView {
     const recipients = document.querySelector('#recipients') as HTMLTextAreaElement;
     if (!recipients) return;
     
-    const emailAddresses = this.recipientsData.map(r => r.email).join(', ');
-    recipients.value = emailAddresses;
+    // Format recipients as "Name <email>" on separate lines, as the label suggests
+    const formattedRecipients = this.recipientsData.map(r => {
+      if (r.name && r.email) {
+        return `${r.name} <${r.email}>`;
+      } else if (r.email) {
+        return r.email;
+      }
+      return '';
+    }).filter(recipient => recipient.length > 0);
+    
+    recipients.value = formattedRecipients.join('\n');
     this.updateRecipientCount();
     
     console.log('[ComposeView] Populated recipients from URL data');
