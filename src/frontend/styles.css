@@ -1,4 +1,10 @@
 body { font-family: system-ui, Arial, sans-serif; margin:0; background:#111; color:#eee; }
+
+/* Temporarily disable embedded menu layout adjustments for debugging */
+/* body.has-embedded-menu {
+  padding-top: 60px;
+} */
+
 header { 
   padding: 12px 20px; 
   background: #181818; 
@@ -15,15 +21,7 @@ header {
   gap: 4px;
 }
 
-#appTitle {
-  font-size: 2.4em !important;
-  font-weight: 700 !important;
-  margin: 0 !important;
-  line-height: 1.1 !important;
-  color: #fff !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3) !important;
-  letter-spacing: -0.02em !important;
-}
+/* Let Bootstrap handle h1 styling for app title */
 
 #viewFunction {
   font-size: 1em !important;
@@ -66,24 +64,7 @@ header {
   display: none;
 }
 
-.navBtn { 
-  background: #2b2b2b !important; 
-  padding: 6px 10px !important; 
-  font-size: 0.8rem !important; 
-  border: 1px solid #333 !important;
-  border-radius: 3px !important;
-  color: #ddd !important;
-  cursor: pointer !important;
-  transition: all 0.15s ease !important;
-  white-space: nowrap !important;
-  min-width: 0 !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
-  text-align: center !important;
-  line-height: 1.2 !important;
-  margin: 0 !important;
-  font-weight: 500 !important;
-}
+/* Use Bootstrap btn classes instead of custom navBtn styling */
 
 /* Hide ALL role-restricted buttons by default - only JavaScript capability system can show them */
 .navBtn[data-view="tenants"],
@@ -116,68 +97,13 @@ header {
   padding-bottom: 2px !important;
 }
 
-.navBtn:hover {
-  background: #3a3a3a !important;
-  border-color: #444 !important;
-}
-
-.navBtn.active { 
-  background: #5050ff !important; 
-  border-color: #6060ff !important;
-  color: #fff !important;
-}
-
-/* Special styling for primary actions */
-.navBtn[data-view="compose"],
-.navBtn[data-view="sms-compose"] {
-  background: #2a4a2a !important;
-  border-color: #3a5a3a !important;
-}
-
-.navBtn[data-view="compose"]:hover,
-.navBtn[data-view="sms-compose"]:hover {
-  background: #3a5a3a !important;
-}
-
-.navBtn[data-view="compose"].active,
-.navBtn[data-view="sms-compose"].active {
-  background: #4a6a4a !important;
-}
-
-/* Special styling for admin actions */
-.navBtn[data-view="apps"],
-.navBtn[data-view="tenants"] {
-  background: #4a2a2a !important;
-  border-color: #5a3a3a !important;
-}
-
-.navBtn[data-view="apps"]:hover,
-.navBtn[data-view="tenants"]:hover {
-  background: #5a3a3a !important;
-}
-
-.navBtn[data-view="apps"].active,
-.navBtn[data-view="tenants"].active {
-  background: #6a4a4a !important;
-}
-.navBtn:hover {
-  background: #3a3a3a;
-  border-color: #444;
-}
-.navBtn.active { 
-  background: #5050ff; 
-  border-color: #6060ff;
-  color: #fff;
-}
+/* Use Bootstrap btn-primary and btn-active classes instead */
 .fullwidth { grid-column:1 / -1; }
 .layout { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; padding:16px; }
-.panel { background:#1e1e1e; padding:14px 16px 30px; border:1px solid #2a2a2a; border-radius:8px; display:flex; flex-direction:column; }
-.panel h2 { margin-top:0; font-size:1.1rem; }
-label { display:flex; flex-direction:column; gap:4px; font-size:0.85rem; margin-bottom:10px; }
-input, textarea { background:#121212; color:#eee; border:1px solid #333; border-radius:4px; padding:6px 8px; font-family:inherit; font-size:0.85rem; }
-input:focus, textarea:focus { outline:2px solid #5050ff; }
-button { background:#5050ff; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.85rem; }
-button:hover { background:#6a6aff; }
+/* Let Bootstrap handle card/panel styling */
+/* Let Bootstrap handle label styling */
+/* Minimal dark theme for mail service admin pages only - not compose interface */
+/* Use Bootstrap button classes instead of generic button override */
 button:disabled { opacity:.5; cursor:not-allowed; }
 .status { min-height:18px; font-size:0.7rem; margin-top:6px; color:#8ab4ff; white-space:pre-wrap; }
 #templateList { margin-top:12px; font-size:0.75rem; line-height:1.3; }
@@ -217,8 +143,8 @@ fieldset {
 /* List rows for templates, groups, events */
 .tplRow, .grpRow, .evtRow { display:flex; align-items:center; gap:6px; padding:3px 4px; border-bottom:1px solid #222; }
 .tplRow:last-child, .grpRow:last-child, .evtRow:last-child { border-bottom:none; }
-.tplRow button.loadTpl, .grpRow button.loadGroup { background:#2b2b2b; color:#ddd; padding:2px 6px; font-size:0.6rem; border-radius:4px; font-weight:500; }
-.tplRow button.loadTpl:hover, .grpRow button.loadGroup:hover { background:#3a3a3a; }
+.tplRow button.loadTpl, .grpRow button.loadGroup { background:#5050ff; color:#fff; padding:2px 6px; font-size:0.6rem; border-radius:4px; font-weight:500; }
+.tplRow button.loadTpl:hover, .grpRow button.loadGroup:hover { background:#6a6aff; }
 
 /* Sub sections (tenant/app selectors) */
 .sub { margin-top:12px; font-size:0.7rem; }
@@ -267,35 +193,7 @@ textarea:disabled {
     gap: 15px;
 }
 
-.config-btn {
-    background: #4a4a4a;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-}
-
-.config-btn:hover {
-    background: #5a5a5a;
-}
-
-.config-btn-secondary {
-    background: #333;
-}
-
-.config-btn-secondary:hover {
-    background: #444;
-}
-
-.config-btn-danger {
-    background: #d32f2f;
-}
-
-.config-btn-danger:hover {
-    background: #e53e3e;
-}
+/* Use Bootstrap btn, btn-primary, btn-secondary, btn-danger classes instead */
 
 .config-card {
     background: #1a1a1a;
@@ -393,47 +291,9 @@ textarea:disabled {
     margin-top: 20px;
 }
 
-.config-btn {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: background-color 0.2s;
-}
+/* Use Bootstrap btn, btn-primary, btn-secondary, btn-danger classes instead */
 
-.config-btn-primary {
-    background: #0066cc;
-    color: #fff;
-}
-
-.config-btn-primary:hover {
-    background: #0052a3;
-}
-
-.config-btn-secondary {
-    background: #444;
-    color: #ddd;
-}
-
-.config-btn-secondary:hover {
-    background: #555;
-}
-
-.config-btn-danger {
-    background: #cc4444;
-    color: #fff;
-}
-
-.config-btn-danger:hover {
-    background: #aa3333;
-}
-
-.config-btn:disabled {
-    background: #333;
-    color: #888;
-    cursor: not-allowed;
-}
+/* Use Bootstrap btn:disabled instead */
 
 .config-status {
     padding: 10px;
@@ -897,16 +757,7 @@ textarea:disabled {
     text-transform: uppercase;
 }
 
-/* Config Button Enhancements */
-.config-btn-primary {
-    background: #4fc3f7;
-    color: #000;
-    font-weight: bold;
-}
-
-.config-btn-primary:hover {
-    background: #29b6f6;
-}
+/* Use Bootstrap btn-primary class instead */
 
 /* Modal Enhancements */
 #globalConfigModal fieldset {
@@ -1046,67 +897,11 @@ textarea:disabled {
     margin-bottom: 20px;
 }
 
-.mail-fields label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: #eee;
-}
+/* Let Bootstrap handle mail field labels */
 
-.mail-fields .form-control {
-    width: 100%;
-    padding: 10px;
-    background: #121212;
-    color: #eee;
-    border: 1px solid #333;
-    border-radius: 4px;
-    font-size: 14px;
-}
+/* Let Bootstrap handle form-control styling */
 
-.mail-fields .form-control:focus {
-    outline: none;
-    border-color: #5050ff;
-    box-shadow: 0 0 0 2px rgba(80, 80, 255, 0.2);
-}
-
-.mail-fields textarea.form-control {
-    resize: vertical;
-    font-family: inherit;
-}
-
-.mail-fields select.form-control {
-    cursor: pointer;
-}
-
-.btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    display: inline-block;
-    margin-right: 10px;
-}
-
-.btn-primary {
-    background: #5050ff;
-    color: white;
-}
-
-.btn-primary:hover {
-    background: #6a6aff;
-}
-
-.btn-secondary {
-    background: #6c757d;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background: #5a6268;
-}
+/* Use native Bootstrap btn, btn-primary, btn-secondary classes */
 
 #addressCount {
     font-weight: bold;
@@ -1131,28 +926,7 @@ textarea:disabled {
     max-width: 250px;
 }
 
-/* File input styling */
-input[type="file"] {
-    background: #2a2a2a;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 8px;
-    color: #eee;
-}
-
-input[type="file"]::-webkit-file-upload-button {
-    background: #5050ff;
-    color: white;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 3px;
-    cursor: pointer;
-    margin-right: 10px;
-}
-
-input[type="file"]::-webkit-file-upload-button:hover {
-    background: #6a6aff;
-}
+/* Let Bootstrap handle file input styling */
 
 /* Rich Text Editor Styles */
 .editor-toolbar {

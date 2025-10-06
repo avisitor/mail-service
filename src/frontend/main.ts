@@ -24,6 +24,226 @@ interface TemplateRecord {
 interface Tenant { id:string; name:string; status?:string; }
 interface AppRec { id:string; tenantId:string; name:string; clientId:string; }
 
+// App configuration interfaces
+interface AppConfig {
+  title?: string;
+  description?: string;
+  css_url?: string;
+  banner?: {
+    id?: string;
+    className?: string;
+    html?: string;
+    afterBanner?: string;
+  };
+  embeddedMenu?: {
+    url: string;
+    targetSelector?: string;
+    replaceTarget?: boolean;
+  };
+}
+
+interface AppsConfig {
+  [appId: string]: AppConfig;
+}
+
+// Custom CSS loading functions
+async function loadAppsConfig(): Promise<AppsConfig> {
+  try {
+    const response = await fetch('/ui/keys/apps.json');
+    if (!response.ok) {
+      console.warn('[CustomCSS] Failed to load apps.json:', response.status);
+      return {};
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn('[CustomCSS] Error loading apps.json:', error);
+    return {};
+  }
+}
+
+async function loadCustomCSS(appId: string): Promise<void> {
+  if (!appId) {
+    console.debug('[CustomCSS] No appId provided, using default styling');
+    return;
+  }
+
+  try {
+    const appsConfig = await loadAppsConfig();
+    const appConfig = appsConfig[appId];
+    
+    if (!appConfig?.css_url) {
+      console.debug(`[CustomCSS] No custom CSS configured for app: ${appId}`);
+      return;
+    }
+
+    console.log(`[CustomCSS] Loading custom CSS for ${appId}: ${appConfig.css_url}`);
+    
+    // Create and inject CSS link
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = appConfig.css_url;
+    link.id = 'custom-app-css';
+    
+    // Add error handling
+    link.onerror = () => {
+      console.warn(`[CustomCSS] Failed to load custom CSS: ${appConfig.css_url}`);
+    };
+    
+    link.onload = () => {
+      console.log(`[CustomCSS] Successfully loaded custom CSS for ${appId}`);
+    };
+    
+    // Remove any existing custom CSS
+    const existingCSS = document.getElementById('custom-app-css');
+    if (existingCSS) {
+      existingCSS.remove();
+    }
+    
+    // Inject custom CSS
+    document.head.appendChild(link);
+    
+    // Update app title if configured
+    if (appConfig.title) {
+      const appTitleElement = document.getElementById('appTitle');
+      if (appTitleElement) {
+        appTitleElement.textContent = appConfig.title;
+      }
+    }
+    
+    // Add app-specific enhancements
+    await addAppSpecificEnhancements(appId, appConfig);
+    
+  } catch (error) {
+    console.error('[CustomCSS] Error loading custom CSS:', error);
+  }
+}
+
+async function addAppSpecificEnhancements(appId: string, appConfig: AppConfig): Promise<void> {
+  // Add banner if configured
+  if (appConfig.banner) {
+    addBanner(appConfig.banner);
+  }
+  
+  // Load embedded menu if configured
+  console.log('[DEBUG] Checking for embeddedMenu configuration:', !!appConfig.embeddedMenu);
+  if (appConfig.embeddedMenu) {
+    console.log('[DEBUG] embeddedMenu config:', appConfig.embeddedMenu);
+    // Get current URL parameters to pass app-specific data back to menu endpoint
+    const urlParams = new URLSearchParams(window.location.search);
+    const appSpecificParams: Record<string, string> = {};
+    
+    // Extract parameters that might be app-specific (excluding mail service parameters)
+    const mailServiceParams = new Set(['appId', 'token', 'recipients', 'to', 'subject', 'returnUrl', 'body', 'html']);
+    
+    console.log('[DEBUG] All URL params:', Object.fromEntries(urlParams.entries()));
+    
+    for (const [key, value] of urlParams.entries()) {
+      if (!mailServiceParams.has(key)) {
+        appSpecificParams[key] = value;
+      }
+    }
+    
+    console.log('[DEBUG] App-specific params to pass to menu:', appSpecificParams);
+    await loadEmbeddedMenu(appConfig.embeddedMenu, appSpecificParams);
+  }
+}
+
+async function loadEmbeddedMenu(menuConfig: any, appParams: Record<string, string> = {}): Promise<void> {
+  try {
+    // Build URL with app-specific parameters
+    const url = new URL(menuConfig.url);
+    
+    // Add all app-specific parameters to the URL
+    for (const [key, value] of Object.entries(appParams)) {
+      url.searchParams.set(key, value);
+    }
+    
+    console.log('[EmbeddedMenu] Loading menu from:', url.toString());
+    console.log('[EmbeddedMenu] App parameters:', appParams);
+    
+    // First try without credentials to avoid CORS issues with wildcard origin
+    let response = await fetch(url.toString(), {
+      method: 'GET',
+      credentials: 'omit', // Don't include cookies to avoid CORS conflict
+      headers: {
+        'Accept': 'text/html'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Menu fetch failed: ${response.status}`);
+    }
+    
+    const menuHTML = await response.text();
+    console.log('[EmbeddedMenu] Received menu HTML length:', menuHTML.length);
+    
+    // Find the target element to replace or insert the menu
+    const targetSelector = menuConfig.targetSelector || '[data-embedded-menu]';
+    const targetElement = document.querySelector(targetSelector);
+    
+    console.log('[EmbeddedMenu] Target selector:', targetSelector);
+    console.log('[EmbeddedMenu] Target element found:', !!targetElement);
+    
+    if (targetElement) {
+      if (menuConfig.replaceTarget) {
+        // Replace the entire target element
+        targetElement.outerHTML = menuHTML;
+      } else {
+        // Insert the menu content inside the target element
+        targetElement.innerHTML = menuHTML;
+      }
+      
+      // Add class to body to adjust layout for fixed positioned menu
+      document.body.classList.add('has-embedded-menu');
+      
+      console.log('[EmbeddedMenu] Menu loaded successfully from:', menuConfig.url);
+    } else {
+      console.warn('[EmbeddedMenu] Target element not found:', targetSelector);
+    }
+    
+  } catch (error) {
+    console.error('[EmbeddedMenu] Failed to load menu:', error);
+  }
+}
+
+function addBanner(bannerConfig: any): void {
+  // Remove existing banner if present
+  const existingBanner = document.querySelector('[id$="-banner"]');
+  if (existingBanner) {
+    existingBanner.remove();
+  }
+  
+  // Remove existing after-banner content
+  const existingAfterBanner = document.querySelector('.retree-nav-buttons, .outings-nav-buttons');
+  if (existingAfterBanner) {
+    existingAfterBanner.remove();
+  }
+  
+  // Create banner HTML
+  const banner = document.createElement('div');
+  banner.id = bannerConfig.id || 'app-banner';
+  banner.className = bannerConfig.className || 'app-banner';
+  banner.innerHTML = bannerConfig.html || '';
+  
+  // Insert banner at the top of the app
+  const app = document.getElementById('app');
+  if (app && app.firstChild) {
+    app.insertBefore(banner, app.firstChild);
+    
+    // Add after-banner content if provided
+    if (bannerConfig.afterBanner) {
+      const afterBannerDiv = document.createElement('div');
+      afterBannerDiv.innerHTML = bannerConfig.afterBanner;
+      const afterContent = afterBannerDiv.firstElementChild;
+      if (afterContent) {
+        app.insertBefore(afterContent, banner.nextSibling);
+      }
+    }
+  }
+  
+  console.log('[CustomCSS] Added app banner');
+}
+
 // View Architecture
 interface IView {
   readonly name: string;
@@ -88,7 +308,7 @@ class ViewRegistry {
       await view.activate();
       
       // Update navigation
-      document.querySelectorAll('.navBtn').forEach(el => 
+      document.querySelectorAll('.btn[data-view]').forEach(el => 
         el.classList.toggle('active', el.getAttribute('data-view') === viewName)
       );
       
@@ -4598,7 +4818,7 @@ async function initializeViews(): Promise<void> {
 function wireNav() {
   const roles: string[] = state.user?.roles || [];
   
-  document.querySelectorAll<HTMLButtonElement>('button.navBtn').forEach(btn => 
+  document.querySelectorAll<HTMLButtonElement>('button.btn[data-view]').forEach(btn => 
     btn.addEventListener('click', async () => {
       await viewRegistry.showView(btn.dataset.view!, roles);
       savePageState();
@@ -4681,6 +4901,12 @@ async function init() {
   if (tenantHint && !hasTokenParam) { try { localStorage.setItem('tenantId', tenantHint); tenantId = tenantHint; } catch {} }
   if (clientIdHint) { try { localStorage.setItem('appClientIdHint', clientIdHint); } catch {} }
   if (appIdHint) { try { localStorage.setItem('appIdHint', appIdHint); } catch {} }
+  
+  // Load custom CSS for the application
+  if (appIdHint) {
+    await loadCustomCSS(appIdHint);
+  }
+  
   const tokenFromUrl = url.searchParams.get('token');
   // Distinguish between coming from IDP vs being called directly from another app
   // If there are specific view parameters like view=email-logs, this is likely a direct call
@@ -6622,19 +6848,19 @@ function updateActionButtons() {
   let buttonsHtml = '';
   
   if (hasConfig) {
-    buttonsHtml += `<button type="submit" class="config-btn">Update ${scopeLabel} Config</button>`;
+    buttonsHtml += `<button type="submit" class="btn btn-primary">Update ${scopeLabel} Config</button>`;
     
     // Add activation button for inactive global configs
     if (scope === 'GLOBAL' && currentSmtpConfig && !currentSmtpConfig.isActive) {
-      buttonsHtml += `<button type="button" class="config-btn config-btn-primary" onclick="activateGlobalConfig('${currentSmtpConfig.id}')">Activate This Config</button>`;
+      buttonsHtml += `<button type="button" class="btn btn-success" onclick="activateGlobalConfig('${currentSmtpConfig.id}')">Activate This Config</button>`;
     }
     
-    buttonsHtml += `<button type="button" class="config-btn config-btn-danger" onclick="deleteSmtpConfig()">Delete Config</button>`;
+    buttonsHtml += `<button type="button" class="btn btn-danger" onclick="deleteSmtpConfig()">Delete Config</button>`;
   } else {
-    buttonsHtml += `<button type="submit" class="config-btn">Create ${scopeLabel} Config</button>`;
+    buttonsHtml += `<button type="submit" class="btn btn-primary">Create ${scopeLabel} Config</button>`;
   }
   
-  buttonsHtml += `<button type="button" class="config-btn config-btn-secondary" onclick="refreshSmtpTree()">Refresh</button>`;
+  buttonsHtml += `<button type="button" class="btn btn-secondary" onclick="refreshSmtpTree()">Refresh</button>`;
   
   actionButtons.innerHTML = buttonsHtml;
 }

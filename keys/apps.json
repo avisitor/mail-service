@@ -1,0 +1,68 @@
+{
+  "cmfka688r0001b77ofpgm57ix": {
+    "title": "ReTree Hawaii",
+    "description": "ReTree Hawaii environmental project management",
+    "css_url": "https://retree-hawaii.worldspot.org/auth/retree-hawaii-mail.css",
+    "banner": {
+      "id": "retree-banner",
+      "className": "retree-banner",
+      "html": "<div class=\"banner-content\"><span class=\"banner-text\">ReTree Hawaii<br>Lā Ho'oulu Pae Moku</span></div><div class=\"retree-nav-buttons\"><a href=\"https://retree-hawaii.worldspot.org/planting/\"><div class=\"homeButton\">Home</div></a><a href=\"https://retree-hawaii.worldspot.org/\"><div class=\"frontButton\">Front</div></a></div>"
+    }
+  },
+  "outings-app-id": {
+    "title": "Outings",
+    "description": "Outing management and scheduling application",
+    "css_url": "https://outings.worldspot.org/auth/outings-mail.css",
+    "embeddedMenu": {
+      "url": "https://outings.worldspot.org/api/menu-component.php",
+      "targetSelector": "[data-embedded-menu]",
+      "replaceTarget": false
+    }
+  },
+  "cmfm6bqcf0001ylk8lx4pyd6n": {
+    "title": "ReTree Hawaii",
+    "description": "ReTree Hawaii environmental project management (alternate instance)",
+    "css_url": "https://retree-hawaii.worldspot.org/auth/retree-hawaii-mail.css",
+    "banner": {
+      "id": "retree-banner",
+      "className": "retree-banner",
+      "html": "<div class=\"banner-content\"><span class=\"banner-text\">ReTree Hawaii<br>Lā Ho'oulu Pae Moku</span></div><div class=\"retree-nav-buttons\"><a href=\"https://retree-hawaii.worldspot.org/planting/\"><div class=\"homeButton\">Home</div></a><a href=\"https://retree-hawaii.worldspot.org/\"><div class=\"frontButton\">Front</div></a></div>"
+    }
+  },
+  "cmfm6bqcj0003ylk8qbr4e9hb": {
+    "title": "Outings",
+    "description": "Outing management and scheduling application (alternate instance)",
+    "css_url": "https://outings.worldspot.org/auth/outings-mail.css",
+    "banner": {
+      "id": "outings-simple",
+      "className": "outings-simple",
+      "html": "<div class=\"simple-nav\" data-dynamic-menu=\"true\"><a href=\"#\"><div class=\"homeButton\">Home</div></a></div><div class=\"page-title\">Sierra Club Maui Hikes</div>"
+    },
+    "menu": {
+      "buttonText": "Home",
+      "buttonClass": "homeButton",
+      "items": [
+        {
+          "text": "Home",
+          "url": "https://outings.worldspot.org/"
+        },
+        {
+          "text": "Calendar",
+          "url": "https://outings.worldspot.org/calendar.php"
+        },
+        {
+          "text": "Trip Reports",
+          "url": "https://outings.worldspot.org/reports.php"
+        },
+        {
+          "text": "Member Area",
+          "url": "https://outings.worldspot.org/members/"
+        },
+        {
+          "text": "Contact",
+          "url": "https://outings.worldspot.org/contact.php"
+        }
+      ]
+    }
+  }
+}

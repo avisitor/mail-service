@@ -510,14 +510,11 @@ export function buildApp() {
     console.log('[/compose] AppId validated successfully:', validation.app.name);
     
     // Always redirect to frontend UI - let frontend JavaScript handle authentication
-    const composeParams = new URLSearchParams({
-      view: 'compose',
-      ...(appId && { appId }),
-      ...(returnUrl && { returnUrl }),
-      ...(recipients && { recipients }),
-      ...(token && { token })
-    });
-    return reply.redirect(`/ui?${composeParams}`);
+    // Pass through ALL query parameters to preserve app-specific role information
+    const allParams = new URLSearchParams(req.query as any);
+    allParams.set('view', 'compose'); // Ensure view is set to compose
+    
+    return reply.redirect(`/ui?${allParams}`);
   });
   
   // Template Editor route - redirects to IDP for authentication then shows template editor interface (tenant admin only)

@@ -4,12 +4,16 @@
   <meta charset="UTF-8" />
   <title>Mail Service - Compose</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/ui/styles.css" />
   <script src="https://cdn.tiny.cloud/1/pm0hwd9ezk1wqe3lvzr86js295g5qcq1vp2pbzgzm0fpbluh/tinymce/7/tinymce.min.js" referrerpolicy="origin"></script>
 </head>
 <body>
   <div id="app">
     <header>
+      <!-- Embedded menu placeholder for app-specific navigation -->
+      <div data-embedded-menu></div>
       <div id="viewTitle">
         <h1 id="appTitle">Mail Service</h1>
         <div id="viewFunction"></div>
@@ -17,31 +21,31 @@
       <nav class="topnav">
         <!-- Admin Functions -->
         <div class="nav-group">
-          <button data-view="tenants" class="navBtn" id="tenantsNavBtn">Tenants</button>
-          <button data-view="apps" class="navBtn" id="appsNavBtn">Apps</button>
+          <button data-view="tenants" class="btn btn-primary btn-sm" id="tenantsNavBtn">Tenants</button>
+          <button data-view="apps" class="btn btn-primary btn-sm" id="appsNavBtn">Apps</button>
         </div>
         
         <!-- Primary Actions -->
         <div class="nav-group">
-          <button data-view="compose" class="navBtn">Compose</button>
-          <button data-view="sms-compose" class="navBtn">Send SMS</button>
+          <button data-view="compose" class="btn btn-primary btn-sm">Compose</button>
+          <button data-view="sms-compose" class="btn btn-primary btn-sm">Send SMS</button>
         </div>
         
         <!-- Content Management -->
         <div class="nav-group">
-          <button data-view="template-editor" class="navBtn" id="templateEditorNavBtn">Templates</button>
+          <button data-view="template-editor" class="btn btn-primary btn-sm" id="templateEditorNavBtn">Templates</button>
         </div>
         
         <!-- Configuration -->
         <div class="nav-group">
-          <button data-view="smtp-config" class="navBtn">Config</button>
-          <button data-view="sms-config" class="navBtn">SMS Config</button>
+          <button data-view="smtp-config" class="btn btn-primary btn-sm">Config</button>
+          <button data-view="sms-config" class="btn btn-primary btn-sm">SMS Config</button>
         </div>
         
         <!-- Monitoring -->
         <div class="nav-group">
-          <button data-view="email-logs" class="navBtn" id="emailLogsNavBtn">Email Logs</button>
-          <button data-view="sms-logs" class="navBtn" id="smsLogsNavBtn">SMS Logs</button>
+          <button data-view="email-logs" class="btn btn-primary btn-sm" id="emailLogsNavBtn">Email Logs</button>
+          <button data-view="sms-logs" class="btn btn-primary btn-sm" id="smsLogsNavBtn">SMS Logs</button>
         </div>
       </nav>
       <div class="env" id="envInfo"></div>
@@ -76,14 +80,14 @@
         </div>
         
         <div style="margin-bottom: 20px;">
-          <button type="button" id="createAppBtn" class="config-btn config-btn-primary">+ Create Application</button>
+          <button type="button" id="createAppBtn" class="btn btn-success">+ Create Application</button>
         </div>
         
         <form id="appForm" style="margin-bottom: 20px; display: none;">
           <div class="grid" style="grid-template-columns: 1fr auto auto; gap: 10px; align-items: end;">
             <label>App Name <input name="appName" placeholder="My Application" required /></label>
             <button type="submit">Create Application</button>
-            <button type="button" id="cancelAppBtn" class="config-btn config-btn-secondary">Cancel</button>
+            <button type="button" id="cancelAppBtn" class="btn btn-secondary">Cancel</button>
           </div>
           <div class="status" id="appFormStatus"></div>
         </form>
@@ -927,6 +931,9 @@
       </details>
     </div>
   </div>
+  
+  <!-- Bootstrap JavaScript -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <!-- Use compiled JS under /ui/ (dist build places main.js there). -->
   <script type="module" src="/ui/main.js"></script>
 </body>
