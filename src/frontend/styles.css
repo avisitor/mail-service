@@ -1083,3 +1083,8 @@ textarea:disabled {
     font-style: italic;
 }
 
+/* Utility classes for Bootstrap compatibility */
+.cursor-pointer {
+    cursor: pointer;
+}
+

@@ -3050,29 +3050,27 @@ class SmsLogsView implements IView {
           messagePreview = log.message === null ? 'No message content' : 'Empty message';
         }
         
-        // Add status indicator
-        let statusColor = '#6c757d';
+        // Add status indicator with Bootstrap classes
+        let statusClass = 'text-secondary';
         let statusText = 'Sent';
         if (log.delivered) {
-          statusColor = '#28a745';
+          statusClass = 'text-success';
           statusText = '✓ Delivered';
         } else if (log.failed) {
-          statusColor = '#dc3545';
+          statusClass = 'text-danger';
           statusText = '✗ Failed';
         }
 
         return `
-          <div style="display: grid; grid-template-columns: 1fr 2fr 1.5fr 1fr 3fr; gap: 1px; background: #333; min-height: 45px;">
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(dateTime)}">${dateTime}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(senderName + ' (' + senderPhone + ')')}">${sender}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(log.recipients || '')}">${recipient}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: ${statusColor}; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word; font-weight: bold;" title="Message status">${statusText}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s; overflow: hidden; word-break: break-word;" 
-                 onclick="smsLogsView.showLogDetails('${escapeHtml(log.id)}')"
-                 onmouseover="this.style.backgroundColor='#2a2a2a'" 
-                 onmouseout="this.style.backgroundColor='#1a1a1a'"
-                 title="Click to view full message">${messagePreview}</div>
-          </div>
+            <tr class="align-middle">
+              <td title="${escapeHtml(dateTime)}">${dateTime}</td>
+              <td title="${escapeHtml(senderName + ' (' + senderPhone + ')')}">${sender}</td>
+              <td title="${escapeHtml(log.recipients || '')}">${recipient}</td>
+              <td class="${statusClass} fw-bold" title="Message status">${statusText}</td>
+              <td class="cursor-pointer" 
+                  onclick="smsLogsView.showLogDetails('${escapeHtml(log.id)}')"
+                  title="Click to view full message">${messagePreview}</td>
+            </tr>
         `;
       }).join('');
     }
