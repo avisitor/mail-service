@@ -7,6 +7,177 @@ declare global {
     }
 }
 
+// Debug system for comprehensive view flow tracking
+const DEBUG_VIEW_FLOW = true;
+
+function debugLog(category: string, message: string, data?: any): void {
+  if (DEBUG_VIEW_FLOW) {
+    const timestamp = new Date().toISOString();
+    if (data) {
+      console.log(`${timestamp} [${category}] ${message}`, data);
+    } else {
+      console.log(`${timestamp} [${category}] ${message}`);
+    }
+  }
+}
+
+// Deterministic precondition system - NO polling or timeouts
+class PreconditionManager {
+  private static instance: PreconditionManager | null = null;
+  private preconditions: Map<string, { promise: Promise<void>, resolve: () => void, completed: boolean }> = new Map();
+  private allPreconditionsPromise: Promise<void> | null = null;
+  private allPreconditionsResolve: (() => void) | null = null;
+
+  static getInstance(): PreconditionManager {
+    if (!PreconditionManager.instance) {
+      PreconditionManager.instance = new PreconditionManager();
+    }
+    return PreconditionManager.instance;
+  }
+
+  registerPrecondition(name: string): void {
+    if (this.preconditions.has(name)) {
+      debugLog('PRECONDITIONS', `Precondition ${name} already registered`);
+      return;
+    }
+
+    let resolveFunc: () => void;
+    const promise = new Promise<void>((resolve) => {
+      resolveFunc = resolve;
+    });
+
+    this.preconditions.set(name, {
+      promise,
+      resolve: resolveFunc!,
+      completed: false
+    });
+
+    debugLog('PRECONDITIONS', `Registered precondition: ${name}`);
+    this.updateAllPreconditionsPromise();
+  }
+
+  completePrecondition(name: string): void {
+    const precondition = this.preconditions.get(name);
+    if (!precondition) {
+      debugLog('PRECONDITIONS', `Warning: Precondition ${name} not found`);
+      return;
+    }
+
+    if (precondition.completed) {
+      debugLog('PRECONDITIONS', `Precondition ${name} already completed`);
+      return;
+    }
+
+    precondition.completed = true;
+    precondition.resolve();
+    debugLog('PRECONDITIONS', `Completed precondition: ${name}`);
+    
+    this.checkAllPreconditionsComplete();
+  }
+
+  private updateAllPreconditionsPromise(): void {
+    if (!this.allPreconditionsPromise) {
+      this.allPreconditionsPromise = new Promise<void>((resolve) => {
+        this.allPreconditionsResolve = resolve;
+      });
+    }
+  }
+
+  private checkAllPreconditionsComplete(): void {
+    const allCompleted = Array.from(this.preconditions.values()).every(p => p.completed);
+    if (allCompleted && this.allPreconditionsResolve) {
+      debugLog('PRECONDITIONS', 'All preconditions completed!');
+      this.allPreconditionsResolve();
+      this.allPreconditionsResolve = null;
+    }
+  }
+
+  async waitForAllPreconditions(): Promise<void> {
+    if (!this.allPreconditionsPromise) {
+      this.updateAllPreconditionsPromise();
+    }
+    
+    debugLog('PRECONDITIONS', 'Waiting for all preconditions to complete...');
+    await this.allPreconditionsPromise;
+    debugLog('PRECONDITIONS', 'All preconditions completed - ready to proceed');
+  }
+
+  async waitForPrecondition(name: string): Promise<void> {
+    const precondition = this.preconditions.get(name);
+    if (!precondition) {
+      throw new Error(`Precondition ${name} not registered`);
+    }
+    
+    if (precondition.completed) {
+      return;
+    }
+
+    debugLog('PRECONDITIONS', `Waiting for precondition: ${name}`);
+    await precondition.promise;
+  }
+
+  getPreconditionStatus(): Record<string, boolean> {
+    const status: Record<string, boolean> = {};
+    this.preconditions.forEach((precondition, name) => {
+      status[name] = precondition.completed;
+    });
+    return status;
+  }
+}
+
+// Comprehensive view visibility instrumentation
+function setupViewVisibilityInstrumentation(): void {
+  debugLog('VISIBILITY-DEBUG', 'Setting up comprehensive view visibility instrumentation');
+  
+  document.querySelectorAll('main.layout').forEach(element => {
+    const htmlElement = element as HTMLElement;
+    const originalStyleDisplay = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'style')!;
+    
+    // Monitor style.display changes
+    let currentDisplay = htmlElement.style.display;
+    Object.defineProperty(htmlElement, 'style', {
+      get() {
+        return new Proxy(originalStyleDisplay.get!.call(this), {
+          set(target, property, value) {
+            if (property === 'display' && value !== currentDisplay) {
+              const stack = new Error().stack;
+              debugLog('VISIBILITY-DEBUG', `${htmlElement.id}: style.display changed from "${currentDisplay}" to "${value}"`, { stack });
+              currentDisplay = value;
+            }
+            target[property] = value;
+            return true;
+          }
+        });
+      },
+      set(value) {
+        originalStyleDisplay.set!.call(this, value);
+      }
+    });
+    
+    // Monitor classList operations for 'visible' class
+    const originalAdd = htmlElement.classList.add;
+    const originalRemove = htmlElement.classList.remove;
+    
+    htmlElement.classList.add = function(...tokens) {
+      if (tokens.includes('visible')) {
+        const stack = new Error().stack;
+        debugLog('VISIBILITY-DEBUG', `${htmlElement.id}: addClass 'visible'`, { stack });
+      }
+      return originalAdd.apply(this, tokens);
+    };
+    
+    htmlElement.classList.remove = function(...tokens) {
+      if (tokens.includes('visible')) {
+        const stack = new Error().stack;
+        debugLog('VISIBILITY-DEBUG', `${htmlElement.id}: removeClass 'visible'`, { stack });
+      }
+      return originalRemove.apply(this, tokens);
+    };
+  });
+  
+  debugLog('VISIBILITY-DEBUG', 'View visibility instrumentation complete');
+}
+
 interface TemplateRecord { 
   id: string; 
   appId: string; 
@@ -264,17 +435,27 @@ class ViewRegistry {
   static getInstance(): ViewRegistry {
     if (!ViewRegistry.instance) {
       ViewRegistry.instance = new ViewRegistry();
-      console.debug('[ViewRegistry] Created global instance');
+      debugLog('ViewRegistry', 'Created global instance');
     }
     return ViewRegistry.instance;
   }
 
   register(view: IView): void {
     this.views.set(view.name, view);
-    console.debug(`[ViewRegistry] Registered view: ${view.name}`);
+    debugLog('ViewRegistry', `Registered view: ${view.name}`);
+  }
+
+  areViewsInitialized(): boolean {
+    return this.views.size > 0;
   }
 
   async showView(viewName: string, userRoles: string[] = []): Promise<void> {
+    debugLog('ViewRegistry.showView', `ENTRY: viewName=${viewName}, roles=${userRoles.join(',')}`);
+    
+    // CRITICAL: Wait for ALL preconditions before showing any view
+    const preconditionManager = PreconditionManager.getInstance();
+    await preconditionManager.waitForAllPreconditions();
+    
     console.log(`[ViewRegistry] Attempting to show view: ${viewName} with roles:`, userRoles);
     const view = this.views.get(viewName);
     if (!view) {
@@ -292,20 +473,73 @@ class ViewRegistry {
     // Deactivate current view
     if (this.currentView) {
       this.currentView.deactivate();
+      // Hide only the current view element (not all views)
+      const currentElement = document.getElementById(this.currentView.elementId);
+      if (currentElement) {
+        currentElement.style.display = 'none';
+        currentElement.style.visibility = 'hidden';
+        currentElement.classList.remove('visible');
+      }
     }
-
-    // Hide all view elements
-    this.views.forEach(v => {
-      const element = document.getElementById(v.elementId);
-      if (element) element.style.display = 'none';
-    });
 
     // Show and activate new view
     const element = document.getElementById(view.elementId);
+    debugLog('ViewRegistry.showView', `Got element for ${viewName}:`, element);
+    debugLog('ViewRegistry.showView', `Element ID: ${view.elementId}`);
+    
     if (element) {
+      debugLog('ViewRegistry.showView', `Making view visible: ${viewName} (element ID: ${view.elementId})`);
+      
+      // Debug each style operation
+      debugLog('ViewRegistry.showView', `About to call removeProperty on element style`);
+      try {
+        // Use style.display = '' instead of removeProperty to avoid illegal invocation error
+        element.style.display = '';
+        debugLog('ViewRegistry.showView', `Successfully cleared display property`);
+      } catch (error) {
+        console.error(`[ViewRegistry.showView] Error clearing display property:`, error);
+        throw error;
+      }
+      
+      debugLog('ViewRegistry.showView', `About to set display = 'block'`);
       element.style.display = 'block';
+      element.style.visibility = 'visible';
+      element.classList.add('visible');
+      
       this.currentView = view;
-      await view.activate();
+      debugLog('ViewRegistry.showView', `About to call activate on view: ${viewName}, view object:`, view);
+      debugLog('ViewRegistry.showView', `View activate method:`, view.activate);
+      debugLog('ViewRegistry.showView', `View activate method type: ${typeof view.activate}`);
+      debugLog('ViewRegistry.showView', `View constructor: ${view.constructor.name}`);
+      try {
+        await view.activate.call(view);
+        debugLog('ViewRegistry.showView', `Successfully activated view: ${viewName}`);
+      } catch (error) {
+        console.error(`[ViewRegistry.showView] Error activating view ${viewName}:`, error);
+        
+        // Type-safe error logging
+        if (error instanceof Error) {
+          console.error(`[ViewRegistry.showView] Error name: ${error.name}`);
+          console.error(`[ViewRegistry.showView] Error message: ${error.message}`);
+          if (error.stack) {
+            console.error(`[ViewRegistry.showView] Stack trace:`, error.stack);
+          }
+        } else {
+          console.error(`[ViewRegistry.showView] Non-Error object thrown:`, error);
+        }
+        
+        console.error(`[ViewRegistry.showView] Full error object:`, error);
+        
+        // Log the view object details for debugging
+        console.error(`[ViewRegistry.showView] View object details:`, {
+          name: view.name,
+          elementId: view.elementId,
+          constructor: view.constructor.name,
+          activateMethod: view.activate,
+          activateType: typeof view.activate
+        });
+        throw error;
+      }
       
       // Update navigation
       document.querySelectorAll('.btn[data-view]').forEach(el => 
@@ -2367,17 +2601,25 @@ class EmailLogsView implements IView {
     const currentAppId = urlParams.get('appId');
     this.currentAppFilter = currentAppId || '';
     
+    debugLog('EmailLogsView', `activate: currentAppId=${currentAppId}, currentAppFilter=${this.currentAppFilter}`);
+    
     // Update title with app context
     updateViewTitle('email-logs', currentAppId || undefined);
     
     // Load apps for filter
+    debugLog('EmailLogsView', 'activate: Loading apps filter...');
     await this.loadAppsFilter();
+    debugLog('EmailLogsView', 'activate: Apps filter loaded');
     
     // Initialize sort indicators
+    debugLog('EmailLogsView', 'activate: Updating sort indicators...');
     this.updateSortIndicators();
+    debugLog('EmailLogsView', 'activate: Sort indicators updated');
     
     // Load logs
+    debugLog('EmailLogsView', 'activate: Loading logs...');
     await this.loadLogs();
+    debugLog('EmailLogsView', 'activate: Logs loaded successfully');
   }
 
   deactivate(): void {
@@ -2448,9 +2690,17 @@ class EmailLogsView implements IView {
   }
 
   private async loadLogs(): Promise<void> {
+    debugLog('EmailLogsView', 'loadLogs: ENTRY - Starting log loading process');
+    
     const loadingEl = document.getElementById('emailLogsLoading');
     const tableEl = document.getElementById('emailLogsTable');
     const emptyEl = document.getElementById('emailLogsEmpty');
+    
+    debugLog('EmailLogsView', 'loadLogs: DOM elements found', {
+      loadingEl: !!loadingEl,
+      tableEl: !!tableEl,
+      emptyEl: !!emptyEl
+    });
     
     if (loadingEl) loadingEl.style.display = 'block';
     if (tableEl) tableEl.style.display = 'none';
@@ -2458,7 +2708,11 @@ class EmailLogsView implements IView {
 
     try {
       const token = authToken;
-      if (!token) return;
+      debugLog('EmailLogsView', 'loadLogs: Auth token check', { hasToken: !!token });
+      if (!token) {
+        debugLog('EmailLogsView', 'loadLogs: No auth token - returning early');
+        return;
+      }
 
       const params = new URLSearchParams({
         limit: this.pageSize.toString(),
@@ -2474,43 +2728,84 @@ class EmailLogsView implements IView {
         params.append('sortOrder', this.sortOrder);
       }
 
-      const response = await fetch(`/api/logs/email?${params}`, {
+      const url = `/api/logs/email?${params}`;
+      debugLog('EmailLogsView', 'loadLogs: Making API request', {
+        url,
+        params: Object.fromEntries(params),
+        currentAppFilter: this.currentAppFilter,
+        pageSize: this.pageSize,
+        currentPage: this.currentPage
+      });
+
+      const response = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      debugLog('EmailLogsView', 'loadLogs: API response received', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
       });
 
       if (response.ok) {
         const data = await response.json();
+        debugLog('EmailLogsView', 'loadLogs: Response data parsed', {
+          dataKeys: Object.keys(data),
+          logsCount: data.logs?.length || 0,
+          totalLogs: data.pagination?.total || 0,
+          pagination: data.pagination
+        });
+        
         // Fix: Use pagination.total instead of data.total
         this.totalLogs = data.pagination?.total || 0;
+        debugLog('EmailLogsView', 'loadLogs: About to render logs', { logsToRender: data.logs?.length || 0 });
         this.renderLogs(data.logs || []);
         this.updatePagination();
+        debugLog('EmailLogsView', 'loadLogs: Rendering and pagination complete');
       } else {
         console.error('Failed to load email logs:', response.statusText);
+        debugLog('EmailLogsView', 'loadLogs: API request failed', { status: response.status, statusText: response.statusText });
         this.showError('Failed to load email logs');
       }
     } catch (error) {
       console.error('Error loading email logs:', error);
+      debugLog('EmailLogsView', 'loadLogs: Exception caught', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       this.showError('Error loading email logs');
     } finally {
       if (loadingEl) loadingEl.style.display = 'none';
+      debugLog('EmailLogsView', 'loadLogs: Finally block - hiding loading indicator');
     }
   }
 
   private renderLogs(logs: any[]): void {
+    debugLog('EmailLogsView', 'renderLogs: ENTRY', { logsCount: logs.length });
+    
     const tableEl = document.getElementById('emailLogsTable');
     const emptyEl = document.getElementById('emailLogsEmpty');
     const rowsEl = document.getElementById('emailLogsRows');
 
+    debugLog('EmailLogsView', 'renderLogs: DOM elements found', {
+      tableEl: !!tableEl,
+      emptyEl: !!emptyEl,
+      rowsEl: !!rowsEl
+    });
+
     if (!logs.length) {
+      debugLog('EmailLogsView', 'renderLogs: No logs to display - showing empty state');
       if (tableEl) tableEl.style.display = 'none';
       if (emptyEl) emptyEl.style.display = 'block';
       return;
     }
 
+    debugLog('EmailLogsView', 'renderLogs: Showing table and rendering rows');
     if (tableEl) tableEl.style.display = 'block';
     if (emptyEl) emptyEl.style.display = 'none';
 
     if (rowsEl) {
+      debugLog('EmailLogsView', 'renderLogs: About to generate HTML for rows');
       rowsEl.innerHTML = logs.map(log => {
         // Fix date/time formatting - use 'sent' field from database
         const dateTime = log.sent ? new Date(log.sent).toLocaleString() : 'N/A';
@@ -2587,20 +2882,25 @@ class EmailLogsView implements IView {
         }
 
         return `
-          <div style="display: grid; grid-template-columns: 1fr 2fr 2fr 1.5fr 3fr; gap: 1px; background: #333; min-height: 45px;">
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(dateTime)}">${dateTime}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(senderName + ' <' + senderEmail + '>')}">${sender}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(log.recipients || '')}">${recipients}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; overflow: hidden; word-break: break-word;" title="${escapeHtml(fullSubject)}">${subject}</div>
-            <div style="background: #1a1a1a; padding: 12px; color: #fff; border-bottom: 1px solid #333; cursor: pointer; transition: background-color 0.2s; overflow: hidden; word-break: break-word;" 
+          <tr>
+            <td title="${escapeHtml(dateTime)}">${dateTime}</td>
+            <td title="${escapeHtml(senderName + ' <' + senderEmail + '>')}">${sender}</td>
+            <td title="${escapeHtml(log.recipients || '')}">${recipients}</td>
+            <td title="${escapeHtml(fullSubject)}">${subject}</td>
+            <td style="cursor: pointer;" 
                  onclick="emailLogsView.showLogDetails('${escapeHtml(log.id)}')"
-                 onmouseover="this.style.backgroundColor='#2a2a2a'" 
-                 onmouseout="this.style.backgroundColor='#1a1a1a'"
-                 title="Click to view full message">${messagePreview}</div>
-          </div>
+                 title="Click to view full message">${messagePreview}</td>
+          </tr>
         `;
       }).join('');
+      debugLog('EmailLogsView', 'renderLogs: HTML generated and inserted into DOM', { 
+        htmlLength: rowsEl.innerHTML.length,
+        firstRowPreview: rowsEl.innerHTML.substring(0, 100) + '...'
+      });
+    } else {
+      debugLog('EmailLogsView', 'renderLogs: ERROR - rowsEl not found in DOM');
     }
+    debugLog('EmailLogsView', 'renderLogs: Complete');
   }
 
   private updatePagination(): void {
@@ -2772,7 +3072,11 @@ class EmailLogsView implements IView {
       }
     }
 
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+      // Use Bootstrap's modal show method instead of direct style manipulation
+      const bootstrapModal = new (window as any).bootstrap.Modal(modal);
+      bootstrapModal.show();
+    }
   }
 
   private setSortField(field: string): void {
@@ -3755,7 +4059,12 @@ function applyRoleVisibility() {
 }
 
 function onAuthenticated(cameFromIdp: boolean = false) {
+  debugLog('VIEW-FLOW', `onAuthenticated: ENTRY: cameFromIdp=${cameFromIdp}`);
   console.log('[DEBUG] onAuthenticated called with cameFromIdp:', cameFromIdp);
+  
+  // Complete authentication precondition
+  const preconditionManager = PreconditionManager.getInstance();
+  preconditionManager.completePrecondition('authentication');
   
   // Only restore URL parameters if we actually have saved ones from a real IDP redirect
   // If someone comes directly with a token and URL parameters, preserve those instead
@@ -3809,7 +4118,11 @@ function onAuthenticated(cameFromIdp: boolean = false) {
   const isSuperadmin = roles.includes('superadmin');
   const loadTenantsPromise = isSuperadmin ? loadTenants().catch(()=>{}) : Promise.resolve();
   loadTenantsPromise.then(async () => {
-    // For superadmin, only load tenantId from localStorage if they specifically chose a tenant context
+    debugLog('VIEW-FLOW', 'onAuthenticated: ENTRY into loadTenantsPromise.then() callback');
+    try {
+      // Use the roles and isSuperadmin variables already declared above
+      
+      // For superadmin, only load tenantId from localStorage if they specifically chose a tenant context
     // For non-superadmin, prefer tenantId from token
     if (isSuperadmin) {
       console.log('[DEBUG] Superadmin context logic - cameFromIdp:', cameFromIdp, 'isInTenantContext:', roleContext.isInTenantContext);
@@ -3860,23 +4173,56 @@ function onAuthenticated(cameFromIdp: boolean = false) {
     }
     
     await initializeViews();
+    debugLog('VIEW-FLOW', 'onAuthenticated: Views initialized, setting up modals');
     
     // Set up log message modal close handler
     const closeLogMessageModal = document.getElementById('closeLogMessageModal');
     const logMessageModal = document.getElementById('logMessageModal');
     if (closeLogMessageModal && logMessageModal) {
       closeLogMessageModal.addEventListener('click', () => {
-        logMessageModal.style.display = 'none';
-      });
-      logMessageModal.addEventListener('click', (e) => {
-        if (e.target === logMessageModal) {
-          logMessageModal.style.display = 'none';
+        const bootstrapModal = (window as any).bootstrap.Modal.getInstance(logMessageModal);
+        if (bootstrapModal) {
+          bootstrapModal.hide();
         }
       });
+      // Bootstrap handles backdrop clicks automatically, so we don't need manual handling
     }
     
-    wireNav();
+    await wireNav();
     wireAppManagement();
+    debugLog('VIEW-FLOW', 'onAuthenticated: Navigation wired, completing config-loading precondition');
+    
+    // Complete config loading precondition - all setup is now complete
+    const preconditionManager = PreconditionManager.getInstance();
+    preconditionManager.completePrecondition('config-loading');
+    debugLog('VIEW-FLOW', 'All preconditions completed, now wiring navigation and rendering views');
+    
+    // Remove loading class from body - app is now ready
+    document.body.classList.remove('loading');
+    debugLog('VIEW-FLOW', 'Removed loading class from body - app is ready');
+    
+    // Now that all preconditions are complete, handle URL-based view routing
+    const urlParams2 = new URLSearchParams(window.location.search);
+    const requestedView = urlParams2.get('view');
+    
+    let defaultView = 'compose'; // Default for tenant admins and editors
+    if (isSuperadmin && !roleContext.isInTenantContext) {
+      // Superadmin in global context should see Config view
+      defaultView = 'smtp-config';
+    }
+    
+    const viewToShow = requestedView || defaultView;
+    debugLog('VIEW-FLOW', `Showing initial view: ${viewToShow} (requested: ${requestedView}, default: ${defaultView})`);
+    
+    // Show the view - all preconditions are now met
+    await viewRegistry.showView(viewToShow, roles);
+    } catch (error) {
+      console.error('[VIEW-FLOW] Error in onAuthenticated callback:', error);
+      // Still complete the precondition even if there's an error, so the view can show
+      const preconditionManager = PreconditionManager.getInstance();
+      preconditionManager.completePrecondition('config-loading');
+      debugLog('VIEW-FLOW', 'Config-loading precondition completed despite error');
+    }
   });
 }
 
@@ -4779,6 +5125,7 @@ function showView(view: string) {
 const viewRegistry = ViewRegistry.getInstance();
 
 async function initializeViews(): Promise<void> {
+  debugLog('ViewRegistry', 'Initializing views...');
   console.log('[ViewRegistry] Initializing views...');
   
   // Create view instances (they auto-register themselves in their constructors)
@@ -4807,13 +5154,18 @@ async function initializeViews(): Promise<void> {
   await emailLogsView.initialize();
   await smsLogsView.initialize();
   
+  debugLog('ViewRegistry', 'Views initialized and registered');
   console.log('[ViewRegistry] Views initialized and registered');
+  
+  // Complete view initialization precondition
+  const preconditionManager = PreconditionManager.getInstance();
+  preconditionManager.completePrecondition('view-initialization');
   
   // Ensure navigation visibility is correct after all views are initialized
   setRoleBasedVisibility();
 }
 
-function wireNav() {
+async function wireNav() {
   const roles: string[] = state.user?.roles || [];
   
   document.querySelectorAll<HTMLButtonElement>('button.btn[data-view]').forEach(btn => 
@@ -4839,7 +5191,10 @@ function wireNav() {
   
   // Use URL parameter if provided, otherwise use default
   const viewToShow = requestedView || defaultView;
-  viewRegistry.showView(viewToShow, roles);
+  
+  // DON'T call showView here - it creates race conditions with preconditions
+  // The view will be shown by the URL routing system after all preconditions complete
+  debugLog('VIEW-FLOW', `wireNav: Will show view ${viewToShow} after preconditions complete`);
 }
 
 // Manage Tenants button (in compose context panel)
@@ -4863,7 +5218,24 @@ document.getElementById('quickSendForm')?.addEventListener('submit', async (e) =
 });
 
 async function init() {
+  debugLog('VIEW-FLOW', 'main: Calling init() for authentication and setup');
+  
+  // Set up precondition system
+  const preconditionManager = PreconditionManager.getInstance();
+  preconditionManager.registerPrecondition('authentication');
+  preconditionManager.registerPrecondition('config-loading');
+  preconditionManager.registerPrecondition('view-initialization');
+  
+  // Set up view visibility instrumentation early
+  setupViewVisibilityInstrumentation();
+  
+  debugLog('VIEW-FLOW', 'init: ENTRY: init() function called');
+  
   await detectMode();
+  debugLog('VIEW-FLOW', 'init: detectMode() completed');
+  
+  debugLog('VIEW-FLOW', 'init: Starting config loading');
+  
   // Load dynamic UI config
   try {
     // If not already injected, fetch config.js and evaluate (simple pattern)
@@ -5126,12 +5498,6 @@ async function init() {
   
   // Set up browser history handling
   setupHistoryHandling();
-  
-  // Restore page state after everything is loaded and set up
-  // Use setTimeout to ensure all DOM updates are complete
-  setTimeout(async () => {
-    await restorePageState();
-  }, 100);
 }
 
 // ============= Page State Preservation =============
@@ -5234,7 +5600,10 @@ function saveToHistory(state: PageState) {
 
 async function restorePageState() {
   try {
-    console.debug('[page-state] Starting page state restoration');
+    debugLog('page-state', 'Starting page state restoration');
+    
+    // CRITICAL: This function now assumes all preconditions are met
+    // because it should only be called after ViewRegistry.showView waits for them
     
     // First try to restore from URL parameters
     const url = new URL(window.location.href);
@@ -5242,7 +5611,7 @@ async function restorePageState() {
     const urlView = url.searchParams.get('view');
     const urlContext = url.searchParams.get('context');
     
-    console.debug('[page-state] URL params:', { urlTenantId, urlView, urlContext });
+    debugLog('page-state', 'URL params:', { urlTenantId, urlView, urlContext });
     
     if (urlTenantId || urlView) {
       // Restore tenant context first if needed
@@ -5275,14 +5644,14 @@ async function restorePageState() {
       
       // Then restore the view
       if (urlView) {
-        console.debug('[page-state] Switching to view from URL:', urlView);
+        debugLog('page-state', `Switching to view from URL: ${urlView}`);
         
         // Handle different view types
         switch (urlView) {
           case 'tenant-apps':
             // This is the tenant's apps view - the switchToTenantContext above should have set this up
             // No need to call showView again as switchToTenantContext calls showView('apps')
-            console.debug('[page-state] Tenant apps view - context already set by switchToTenantContext');
+            debugLog('page-state', 'Tenant apps view - context already set by switchToTenantContext');
             break;
           case 'smtp-config':
             // This is the global SMTP config view
@@ -5296,11 +5665,14 @@ async function restorePageState() {
             break;
           case 'compose':
           case 'template-editor':
+          case 'email-logs':
+          case 'sms-logs':
+          case 'sms-compose':
             // Use ViewRegistry for managed views
             const roles: string[] = state.user?.roles || [];
             await viewRegistry.showView(urlView, roles);
             
-            // Restore saved state for these views after activation
+            // Restore saved state for compose and template-editor views after activation
             if (urlView === 'template-editor' && tenantId) {
               // Get the current app ID from the global state
               const currentAppId = getCurrentAppId();
@@ -5334,10 +5706,11 @@ async function restorePageState() {
             }
             break;
           default:
-            console.warn('[page-state] Unknown view type:', urlView);
+            debugLog('page-state', `Unknown view type: ${urlView}`);
             showView(urlView); // Try anyway
         }
       }
+      debugLog('page-state', 'Page state restoration completed');
       return;
     }
     

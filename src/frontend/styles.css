@@ -97,9 +97,57 @@ header {
   padding-bottom: 2px !important;
 }
 
+/* Simple full-screen loading overlay - covers everything until initialization completes */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #ffffff;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Hide loading overlay when app is ready */
+body:not(.loading) .loading-overlay {
+  display: none;
+}
+
+/* Simple spinner animation */
+.loading-spinner {
+  text-align: center;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+body:not(.loading) main.layout.visible { 
+  display: block !important; 
+  visibility: visible !important; 
+  opacity: 1 !important; 
+}
+
+main.layout { visibility: hidden !important; }
+main.layout.visible { visibility: visible !important; }
+
 /* Use Bootstrap btn-primary and btn-active classes instead */
 .fullwidth { grid-column:1 / -1; }
-.layout { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; padding:16px; }
+.layout { display:none !important; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; padding:16px; }
+.layout.visible { display:grid !important; }
 /* Let Bootstrap handle card/panel styling */
 /* Let Bootstrap handle label styling */
 /* Minimal dark theme for mail service admin pages only - not compose interface */

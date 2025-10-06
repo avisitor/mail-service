@@ -9,7 +9,14 @@
   <link rel="stylesheet" href="/ui/styles.css" />
   <script src="https://cdn.tiny.cloud/1/pm0hwd9ezk1wqe3lvzr86js295g5qcq1vp2pbzgzm0fpbluh/tinymce/7/tinymce.min.js" referrerpolicy="origin"></script>
 </head>
-<body>
+<body class="loading">
+  <!-- Full-screen loading overlay - covers everything until initialization completes -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+    </div>
+  </div>
+  
   <div id="app">
     <header>
       <!-- Embedded menu placeholder for app-specific navigation -->
@@ -61,7 +68,7 @@
         <button id="logoutBtn" class="smallBtn" type="button" style="background: #dc3545; border: 1px solid #dc3545; color: white; margin-left: 10px;" title="Logout and clear session">🚪 Logout</button>
       </div>
     </header>
-    <main class="layout" id="view-tenants" style="display:none">
+    <main class="layout" id="view-tenants" style="display:none !important">
       <section class="panel fullwidth">
         <h2>Tenants</h2>
         <form id="tenantForm">
@@ -72,7 +79,7 @@
         <div id="tenantList"></div>
       </section>
     </main>
-    <main class="layout" id="view-apps" style="display:none">
+    <main class="layout" id="view-apps" style="display:none !important">
       <section class="panel fullwidth">
         <h2>Application Management</h2>
         <div id="appContextInfo" style="background: #2a2a2a; padding: 12px; margin-bottom: 15px; border: 1px solid #555; border-radius: 4px;">
@@ -97,7 +104,7 @@
         </div>
       </section>
     </main>
-    <main class="layout" id="view-compose" style="display:none">
+    <main class="layout" id="view-compose" style="display:none !important">
       <div class="compose-container">
         <form id="composeForm" class="mail-fields">
           <!-- Send Mode Selection -->
@@ -195,7 +202,7 @@
         </form>
       </div>
     </main>
-    <main class="layout" id="view-template-editor" style="display:none">
+    <main class="layout" id="view-template-editor" style="display:none !important">
       <div class="compose-container">
         <form id="templateEditorForm" class="mail-fields">
           <!-- Template Selection -->
@@ -248,7 +255,7 @@
         </form>
       </div>
     </main>
-    <main class="layout" id="view-sms-compose" style="display:none">
+    <main class="layout" id="view-sms-compose" style="display:none !important">
       <div class="compose-container">
         <div class="mb-3">
           <h2 class="h2">📱 Send SMS</h2>
@@ -290,7 +297,7 @@
         </form>
       </div>
     </main>
-    <main class="layout" id="view-sms-config" style="display:none">
+    <main class="layout" id="view-sms-config" style="display:none !important">
       <!-- Status Messages -->
       <div class="status" id="smsConfigStatus" style="margin-bottom: 15px;"></div>
       
@@ -396,7 +403,7 @@
         </form>
       </section>
     </main>
-    <main class="layout" id="view-smtp-config" style="display:none">
+    <main class="layout" id="view-smtp-config" style="display:none !important">
       <!-- Role Context Indicator -->
       <section class="panel fullwidth" id="roleContextIndicator" style="background: #2a2a2a; border: 1px solid #555; margin-bottom: 15px; display: none;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -475,7 +482,7 @@
     </main>
     
     <!-- Email Logs View -->
-    <main class="layout" id="view-email-logs" style="display:none">
+    <main class="layout" id="view-email-logs" style="display:none !important">
       <section class="panel fullwidth">
         <div class="d-flex justify-content-between align-items-center mb-4">
           <h2 class="mb-0">📧 Email Logs</h2>
@@ -527,7 +534,7 @@
     </main>
     
     <!-- SMS Logs View -->
-    <main class="layout" id="view-sms-logs" style="display:none">
+    <main class="layout" id="view-sms-logs" style="display:none !important">
       <section class="panel fullwidth">
         <div class="d-flex justify-content-between align-items-center mb-4">
           <h2 class="mb-0">📱 SMS Logs</h2>
@@ -867,49 +874,52 @@
   </div>
   
   <!-- Log Message Modal -->
-  <div id="logMessageModal" style="position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 1000;">
-    <div style="background: #1e1e1e; padding: 24px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.5);">
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-        <h2 id="logMessageModalTitle" style="margin: 0; color: #81c784;">Message Details</h2>
-        <button id="closeLogMessageModal" style="background: transparent; border: none; color: #999; font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
-      </div>
-      
-      <div id="logMessageContent" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div>
-            <strong style="color: #81c784;">Message ID:</strong>
-            <div id="logModalMessageId" style="font-family: monospace; color: #fff; margin-top: 4px; word-break: break-all;"></div>
-          </div>
-          <div>
-            <strong style="color: #81c784;">Date/Time:</strong>
-            <div id="logModalDateTime" style="color: #fff; margin-top: 4px;"></div>
-          </div>
+  <div class="modal fade" id="logMessageModal" tabindex="-1" aria-labelledby="logMessageModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background: #efefff; font-family: 'Lucida Grande', 'Arial', sans-serif; color: #464646;">
+        <div class="modal-header" style="background: #efefff; border-bottom: 1px solid #DFDFDF;">
+          <h5 class="modal-title" id="logMessageModalTitle" style="color: #464646; font-family: 'Lucida Grande', 'Arial', sans-serif; font-weight: bold;">Message Details</h5>
+          <button type="button" class="btn-close" id="closeLogMessageModal" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div>
-            <strong style="color: #81c784;">Sender:</strong>
-            <div id="logModalSender" style="color: #fff; margin-top: 4px;"></div>
+        <div class="modal-body" style="background: #efefff; color: #464646; font-family: 'Lucida Grande', 'Arial', sans-serif; padding: 1rem;">
+          <div id="logMessageContent">
+            <div class="row mb-2" style="font-size: 0.8rem;">
+              <div class="col-md-6 mb-1">
+                <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Message ID:</strong>
+                <div id="logModalMessageId" class="font-monospace" style="color: #464646; font-weight: 450; font-size: 0.7rem; line-height: 1.2;"></div>
+              </div>
+              <div class="col-md-6 mb-1">
+                <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Date/Time:</strong>
+                <div id="logModalDateTime" style="color: #464646; font-weight: 450; font-size: 0.75rem; line-height: 1.2;"></div>
+              </div>
+            </div>
+            
+            <div class="row mb-2" style="font-size: 0.8rem;">
+              <div class="col-md-6 mb-1">
+                <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Sender:</strong>
+                <div id="logModalSender" style="color: #464646; font-weight: 450; font-size: 0.75rem; line-height: 1.2;"></div>
+              </div>
+              <div class="col-md-6 mb-1">
+                <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Recipients:</strong>
+                <div id="logModalRecipients" style="color: #464646; font-weight: 450; font-size: 0.75rem; line-height: 1.2;"></div>
+              </div>
+            </div>
+            
+            <div id="logModalSubjectContainer" class="mb-2" style="display: none; font-size: 0.8rem;">
+              <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Subject:</strong>
+              <div id="logModalSubject" style="color: #464646; font-weight: 450; font-size: 0.75rem; line-height: 1.2;"></div>
+            </div>
+            
+            <div id="logModalStatusContainer" class="mb-2" style="display: none; font-size: 0.8rem;">
+              <strong style="color: #464646; font-weight: 700; font-size: 0.75rem;">Status:</strong>
+              <div id="logModalStatus" style="color: #464646; font-weight: 450; font-size: 0.75rem; line-height: 1.2;"></div>
+            </div>
+            
+            <div class="mb-3" style="margin-top: 1rem;">
+              <strong style="color: #464646; font-weight: 700; font-size: 0.9rem;">Message:</strong>
+              <div id="logModalMessage" class="border rounded p-3 mt-2" style="white-space: pre-wrap; max-height: 300px; overflow-y: auto; font-family: 'Lucida Grande', 'Arial', sans-serif; font-size: 0.9rem; line-height: 1.4; background: #ffffff; border: 1px solid #DFDFDF !important; color: #464646; font-weight: 450;"></div>
+            </div>
           </div>
-          <div>
-            <strong style="color: #81c784;">Recipients:</strong>
-            <div id="logModalRecipients" style="color: #fff; margin-top: 4px; word-break: break-word;"></div>
-          </div>
-        </div>
-        
-        <div id="logModalSubjectContainer" style="display: none;">
-          <strong style="color: #81c784;">Subject:</strong>
-          <div id="logModalSubject" style="color: #fff; margin-top: 4px; word-break: break-word;"></div>
-        </div>
-        
-        <div id="logModalStatusContainer" style="display: none;">
-          <strong style="color: #81c784;">Status:</strong>
-          <div id="logModalStatus" style="margin-top: 4px;"></div>
-        </div>
-        
-        <div>
-          <strong style="color: #81c784;">Message:</strong>
-          <div id="logModalMessage" style="background: #2a2a2a; border: 1px solid #555; border-radius: 4px; padding: 16px; margin-top: 8px; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; color: #fff; font-family: 'Courier New', monospace; font-size: 0.9rem; line-height: 1.4;"></div>
         </div>
       </div>
     </div>
