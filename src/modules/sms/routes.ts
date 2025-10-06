@@ -39,14 +39,11 @@ export async function registerSmsRoutes(app: FastifyInstance) {
     console.log('[/sms-compose] AppId validated successfully:', validation.app.name);
     
     // Always redirect to frontend UI - let frontend JavaScript handle authentication (same as mail compose)
-    const smsParams = new URLSearchParams({
-      view: 'sms-compose',
-      ...(appId && { appId }),
-      ...(phoneNumbers && { phoneNumbers }),
-      ...(message && { message }),
-      ...(returnUrl && { returnUrl })
-    });
-    return reply.redirect(`/ui?${smsParams}`);
+    // Pass through ALL query parameters to preserve app-specific role information
+    const allParams = new URLSearchParams(req.query as any);
+    allParams.set('view', 'sms-compose'); // Ensure view is set to sms-compose
+    
+    return reply.redirect(`/ui?${allParams}`);
   });
   
   // Send SMS via API
