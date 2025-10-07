@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Token Refresh Test</title>
+</head>
+<body>
+    <h1>Mail Service Token Refresh Test</h1>
+    <div id="results"></div>
+    <script>
+        // Test the token refresh functionality
+        async function testTokenRefresh() {
+            const resultsDiv = document.getElementById('results');
+            
+            // Mock a token that should be refreshable (or use a real one for testing)
+            const testToken = 'your-test-token-here';
+            const userEmail = 'test@example.com';
+            
+            try {
+                resultsDiv.innerHTML += '<p>Testing token refresh...</p>';
+                
+                const idpBaseUrl = 'https://idp.worldspot.org';
+                const appId = 'cmfka688r0001b77ofpgm57ix';
+                const refreshUrl = `${idpBaseUrl}/refresh-or-enhance-token.php`;
+                
+                const requestData = {
+                    appId: appId,
+                    token: testToken,
+                    email: userEmail,
+                    claims: {}
+                };
+
+                console.log('Testing token refresh with:', requestData);
+                
+                const response = await fetch(refreshUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(requestData),
+                    credentials: 'include'
+                });
+
+                resultsDiv.innerHTML += `<p>Response status: ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    resultsDiv.innerHTML += `<p>Success! Action: ${result.action}</p>`;
+                    resultsDiv.innerHTML += `<p>Token received: ${result.token ? 'Yes' : 'No'}</p>`;
+                    if (result.token) {
+                        resultsDiv.innerHTML += `<p>Token preview: ${result.token.substring(0, 50)}...</p>`;
+                    }
+                } else {
+                    const errorText = await response.text();
+                    resultsDiv.innerHTML += `<p>Error: ${errorText}</p>`;
+                }
+                
+            } catch (error) {
+                resultsDiv.innerHTML += `<p>Exception: ${error.message}</p>`;
+                console.error('Test error:', error);
+            }
+        }
+        
+        // Run test on page load
+        window.addEventListener('load', testTokenRefresh);
+    </script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Token Refresh Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffe6e6; border-left: 4px solid #f00; }
+        .success { background: #e6ffe6; border-left: 4px solid #0a0; }
+        .info { background: #e6f3ff; border-left: 4px solid #00a; }
+        button { padding: 10px 20px; margin: 10px 5px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>Mail Service Token Refresh Debug</h1>
+    
+    <div>
+        <button onclick="testExpiredToken()">Test with Expired Token</button>
+        <button onclick="testValidToken()">Test with Valid Token</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+    </div>
+    
+    <div id="logs"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.appendChild(div);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        // Copy the token refresh functions from main.ts
+        function extractUserEmailFromToken(token) {
+            try {
+                const parts = token.split('.');
+                if (parts.length !== 3) return null;
+                
+                const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+                return payload.sub || payload.email || null;
+            } catch (error) {
+                log(`Error extracting email from token: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        async function refreshToken(currentToken, userEmail) {
+            try {
+                const idpBaseUrl = 'https://idp.worldspot.org';
+                const appId = 'cmfka688r0001b77ofpgm57ix'; // mail-service app ID
+                const refreshUrl = `${idpBaseUrl}/refresh-or-enhance-token.php`;
+                
+                const requestData = {
+                    appId: appId,
+                    token: currentToken,
+                    email: userEmail,
+                    claims: {}
+                };
+
+                log(`Attempting token refresh at: ${refreshUrl}`, 'info');
+                log(`Request data: ${JSON.stringify(requestData, null, 2)}`, 'info');
+                
+                const response = await fetch(refreshUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(requestData),
+                    credentials: 'include'
+                });
+
+                log(`Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    log(`Error response: ${errorText}`, 'error');
+                    return null;
+                }
+
+                const result = await response.json();
+                
+                if (result.token) {
+                    log(`Token successfully refreshed: ${result.action}`, 'success');
+                    log(`New token preview: ${result.token.substring(0, 50)}...`, 'success');
+                    return result.token;
+                } else {
+                    log('No token in refresh response', 'error');
+                    return null;
+                }
+            } catch (error) {
+                log(`Error during token refresh: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        // Simulate API call with token refresh
+        async function simulateApiCall(token) {
+            try {
+                log(`Making API call to /me with token: ${token.substring(0, 30)}...`, 'info');
+                
+                const response = await fetch('/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                log(`API response: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+                
+                if (response.status === 401) {
+                    log('🔒 API returned 401, attempting silent token refresh...', 'info');
+                    
+                    const userEmail = extractUserEmailFromToken(token);
+                    log(`Extracted user email: ${userEmail}`, 'info');
+                    
+                    const newToken = await refreshToken(token, userEmail);
+                    
+                    if (newToken) {
+                        log('✅ Token refresh successful! Retrying original request...', 'success');
+                        
+                        // Retry with new token
+                        const retryResponse = await fetch('/me', {
+                            headers: {
+                                'Authorization': `Bearer ${newToken}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        
+                        log(`Retry response: ${retryResponse.status} ${retryResponse.statusText}`, retryResponse.ok ? 'success' : 'error');
+                        
+                        if (retryResponse.ok) {
+                            const userData = await retryResponse.json();
+                            log(`Success! User data: ${JSON.stringify(userData, null, 2)}`, 'success');
+                        }
+                    } else {
+                        log('❌ Token refresh failed', 'error');
+                    }
+                } else if (response.ok) {
+                    const userData = await response.json();
+                    log(`Success! User data: ${JSON.stringify(userData, null, 2)}`, 'success');
+                }
+                
+            } catch (error) {
+                log(`API call error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testExpiredToken() {
+            log('=== Testing with expired token ===', 'info');
+            
+            // Create a token that should be expired (old timestamp)
+            const expiredToken = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjZjYTFhMzA5YTczNWZiODMifQ.eyJzdWIiOiJyb2J3QHdvcmxkc3BvdC5jb20iLCJ0ZW5hbnRJZCI6bnVsbCwiYXBwSWQiOiJjbWZrYTY4OHIwMDAxYjc3b2ZwZ201N2l4IiwiaXNzIjoiaHR0cHM6XC9cL2lkcC53b3JsZHNwb3Qub3JnIiwiYXVkIjoibWFpbC1zZXJ2aWNlIiwiaWF0IjoxNzU5ODA4MDIzLCJleHAiOjE3NTk4MDgwODN9.test-signature';
+            
+            await simulateApiCall(expiredToken);
+        }
+
+        async function testValidToken() {
+            log('=== Testing with stored token ===', 'info');
+            
+            const storedToken = localStorage.getItem('authToken');
+            if (storedToken) {
+                await simulateApiCall(storedToken);
+            } else {
+                log('No stored token found in localStorage', 'error');
+            }
+        }
+
+        log('Token refresh debug test loaded. Click buttons to test.', 'info');
+    </script>
+</body>
+</html>

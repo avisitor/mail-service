@@ -1,0 +1,31 @@
+[Unit]
+Description=Mail Service - Development Mode with Auto-reload
+Documentation=https://github.com/avisitor/mail-service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=apache
+Group=web-dev
+WorkingDirectory=/var/www/html/mail-service
+Environment=NODE_ENV=development
+Environment=PORT=3100
+Environment=LOG_LEVEL=debug
+ExecStart=/usr/bin/npm run dev
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/mail-service/mail-service-dev.log
+StandardError=append:/var/log/mail-service/mail-service-dev.log
+SyslogIdentifier=mail-service-dev
+
+# Security settings (minimal for development)
+NoNewPrivileges=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

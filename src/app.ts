@@ -229,6 +229,20 @@ export function buildApp() {
       });
       app.log.info('jwks.json route mounted');
     }
+    
+    // Serve apps.json for frontend configuration
+    const appsPath = join(fileURLToPath(import.meta.url), '../../keys/apps.json');
+    if (existsSync(appsPath)) {
+      app.get('/keys/apps.json', async (_req, reply) => {
+        try {
+          const data = await import('fs/promises').then(m => m.readFile(appsPath, 'utf8'));
+          reply.header('content-type', 'application/json').send(data);
+        } catch (e: any) {
+          reply.code(500).send({ error: e.message });
+        }
+      });
+      app.log.info('apps.json route mounted');
+    }
   } catch (e) {
     app.log.warn({ err: e }, 'jwks.json mount failed');
   }
@@ -788,7 +802,10 @@ export function buildApp() {
         iat: Math.floor(Date.now() / 1000),
         roles: ['tenant_admin'],
         tenantId: 'test-tenant-1', // Use the same test tenant as working tokens
-        appId: appId || 'cmfka688r0001b77ofpgm57ix' // Default to ReTree Hawaii app ID
+        appId: appId || (() => {
+          console.error('❌ [CRITICAL] No appId provided for token debug generation');
+          throw new Error('AppId is required for token generation');
+        })()
       };
       
       const privateKey = fs.readFileSync('keys/private-6ca1a309a735fb83.pem', 'utf8');

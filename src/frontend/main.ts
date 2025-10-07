@@ -227,7 +227,7 @@ interface AppsConfig {
 // Custom CSS loading functions
 async function loadAppsConfig(): Promise<AppsConfig> {
   try {
-    const response = await fetch('/ui/keys/apps.json');
+    const response = await fetch('/keys/apps.json');
     if (!response.ok) {
       console.warn('[CustomCSS] Failed to load apps.json:', response.status);
       return {};
@@ -1851,6 +1851,13 @@ class SmsComposeView implements IView {
     // Set currentAppId for this view
     if (appIdFromUrl) {
       this.currentAppId = appIdFromUrl;
+      
+      // Load custom CSS for this app if not already loaded
+      try {
+        await loadCustomCSS(appIdFromUrl);
+      } catch (error) {
+        console.warn('[SmsComposeView] Failed to load custom CSS:', error);
+      }
     }
     
     // Update title with current app info
@@ -1904,10 +1911,26 @@ class SmsComposeView implements IView {
     // Handle phone numbers data if provided
     if (phoneNumbersFromUrl) {
       try {
+        // First try to parse as JSON array
         this.phoneNumbersData = JSON.parse(decodeURIComponent(phoneNumbersFromUrl));
-        console.log('[SmsComposeView] Phone numbers data from URL:', this.phoneNumbersData);
+        console.log('[SmsComposeView] Phone numbers data from URL (JSON):', this.phoneNumbersData);
       } catch (error) {
-        console.warn('[SmsComposeView] Failed to parse phone numbers data:', error);
+        // If JSON parsing fails, treat as comma-separated string and split it
+        try {
+          const decodedNumbers = decodeURIComponent(phoneNumbersFromUrl);
+          if (decodedNumbers.includes(',')) {
+            // Split by comma and clean up whitespace
+            this.phoneNumbersData = decodedNumbers.split(',').map(num => num.trim()).filter(num => num.length > 0);
+            console.log('[SmsComposeView] Phone numbers data from URL (comma-separated):', this.phoneNumbersData);
+          } else {
+            // Single phone number
+            this.phoneNumbersData = [decodedNumbers.trim()];
+            console.log('[SmsComposeView] Phone numbers data from URL (single):', this.phoneNumbersData);
+          }
+        } catch (parseError) {
+          console.warn('[SmsComposeView] Failed to parse phone numbers data:', parseError);
+          this.phoneNumbersData = [];
+        }
       }
     }
 
@@ -1943,6 +1966,15 @@ class SmsComposeView implements IView {
         }
       }
       
+      // Always try to restore saved state if no URL data was provided
+      if (this.phoneNumbersData.length === 0 && !messageFromUrl) {
+        console.log('[SmsComposeView] No URL data, attempting to restore saved state');
+        await this.restoreState({});
+      }
+      
+      // Ensure phone number formatting after all data is populated
+      this.ensurePhoneNumberFormatting();
+      
       // Update button visibility based on context
       this.updateButtonVisibility();
     } else {
@@ -1970,6 +2002,8 @@ class SmsComposeView implements IView {
         this.updateAppContext();
         this.updateButtonVisibility();
         await this.restoreState({});
+        // Ensure phone number formatting after state restoration
+        this.ensurePhoneNumberFormatting();
       } else {
         console.warn('[SmsComposeView] No appId found in URL or saved state');
         // Still update button visibility even without appId
@@ -2167,13 +2201,31 @@ class SmsComposeView implements IView {
 
     if (phoneNumbers) {
       phoneNumbers.addEventListener('input', this.debounce(() => {
+        console.log('[SmsComposeView] Phone numbers input changed, saving state');
         this.updatePhoneCount();
         this.saveState();
+        // Also ensure formatting on input changes
+        this.ensurePhoneNumberFormatting();
       }, 500));
+      
+      // Handle paste events to convert comma-separated values to line-separated
+      phoneNumbers.addEventListener('paste', (event) => {
+        setTimeout(() => {
+          const originalValue = phoneNumbers.value;
+          const formattedValue = this.formatPhoneNumbers(originalValue);
+          if (formattedValue !== originalValue) {
+            phoneNumbers.value = formattedValue;
+            this.updatePhoneCount();
+            this.saveState();
+            console.log('[SmsComposeView] Paste event: formatted phone numbers');
+          }
+        }, 10); // Small delay to let paste complete
+      });
     }
 
     if (smsMessage) {
       smsMessage.addEventListener('input', this.debounce(() => {
+        console.log('[SmsComposeView] SMS message input changed, saving state');
         this.updateCharCount();
         this.saveState();
       }, 500));
@@ -2200,22 +2252,22 @@ class SmsComposeView implements IView {
     try {
       this.showStatus('Sending SMS...');
       
+      const phoneNumbers = formData.phoneNumbers.split('\n').filter((p: string) => p.trim());
+      
       const response = await api('/api/sms/send', {
         method: 'POST',
         body: JSON.stringify({
           appId: this.currentAppId,
-          phoneNumbers: formData.phoneNumbers.split('\n').filter((p: string) => p.trim()),
+          phoneNumbers: phoneNumbers,
           message: formData.message
         })
       });
 
-      this.showStatus('SMS sent successfully!');
-      
       // Clear form after successful send
       this.clearForm();
       
-      // Return to calling app after successful send (same as email compose)
-      returnToCallingAppFromCompose();
+      // Show success dialog with results
+      showSmsSendSummaryDialog(response, phoneNumbers.length);
       
     } catch (error) {
       console.error('[SmsComposeView] Failed to send SMS:', error);
@@ -2237,6 +2289,36 @@ class SmsComposeView implements IView {
     }
   }
 
+  private formatPhoneNumbers(input: string): string {
+    if (!input) return input;
+    
+    // Log the input for debugging
+    console.log('[SmsComposeView] Formatting phone numbers input:', JSON.stringify(input));
+    
+    // If it contains commas but no newlines, split by comma and join with newlines
+    if (input.includes(',') && !input.includes('\n')) {
+      const formatted = input.split(',').map((num: string) => num.trim()).filter((num: string) => num.length > 0).join('\n');
+      console.log('[SmsComposeView] Converted comma-separated to line-separated:', JSON.stringify(formatted));
+      return formatted;
+    }
+    
+    console.log('[SmsComposeView] No formatting needed, returning original input');
+    return input;
+  }
+
+  private ensurePhoneNumberFormatting(): void {
+    const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
+    if (phoneNumbers) {
+      const currentValue = phoneNumbers.value;
+      const formattedValue = this.formatPhoneNumbers(currentValue);
+      if (formattedValue !== currentValue) {
+        console.log('[SmsComposeView] Auto-formatting phone numbers field');
+        phoneNumbers.value = formattedValue;
+        this.updatePhoneCount();
+      }
+    }
+  }
+
   private getFormData(): any {
     const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
     const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
@@ -2254,8 +2336,10 @@ class SmsComposeView implements IView {
     const smsMessage = document.getElementById('smsMessage') as HTMLTextAreaElement;
     
     if (phoneNumbers && formData.phoneNumbers) {
-      phoneNumbers.value = formData.phoneNumbers;
-      console.log('[SmsComposeView] Set phone numbers:', formData.phoneNumbers);
+      // Use the helper function to format phone numbers
+      const formattedNumbers = this.formatPhoneNumbers(formData.phoneNumbers);
+      phoneNumbers.value = formattedNumbers;
+      console.log('[SmsComposeView] Set phone numbers (after formatting):', formattedNumbers);
     }
     
     if (smsMessage && formData.message) {
@@ -2269,9 +2353,15 @@ class SmsComposeView implements IView {
     
     const phoneNumbers = document.getElementById('phoneNumbers') as HTMLTextAreaElement;
     if (phoneNumbers) {
-      phoneNumbers.value = this.phoneNumbersData.join('\n');
+      const joinedNumbers = this.phoneNumbersData.join('\n');
+      console.log('[SmsComposeView] Populating phone numbers from data:', this.phoneNumbersData);
+      console.log('[SmsComposeView] Joined numbers:', JSON.stringify(joinedNumbers));
+      
+      // Use the helper function in case the data needs additional formatting
+      const formattedNumbers = this.formatPhoneNumbers(joinedNumbers);
+      phoneNumbers.value = formattedNumbers;
       this.updatePhoneCount();
-      console.log('[SmsComposeView] Populated phone numbers from data:', this.phoneNumbersData.length, 'numbers');
+      console.log('[SmsComposeView] Final phone numbers value:', JSON.stringify(phoneNumbers.value));
     }
   }
 
@@ -2348,6 +2438,9 @@ class SmsComposeView implements IView {
   private loadSavedState(appId: string): any {
     try {
       const saved = localStorage.getItem(`smsComposeState_${appId}`);
+      console.log('[SmsComposeView] Checking localStorage for key:', `smsComposeState_${appId}`);
+      console.log('[SmsComposeView] Raw localStorage data:', saved);
+      
       if (!saved) return null;
       
       const parsed = JSON.parse(saved);
@@ -2355,10 +2448,12 @@ class SmsComposeView implements IView {
       // Check if state is too old (older than 24 hours)
       const maxAge = 24 * 60 * 60 * 1000;
       if (Date.now() - parsed.lastSaved > maxAge) {
+        console.log('[SmsComposeView] Saved state is too old, removing');
         localStorage.removeItem(`smsComposeState_${appId}`);
         return null;
       }
       
+      console.log('[SmsComposeView] Loaded valid saved state:', parsed);
       return parsed;
     } catch (error) {
       console.warn('[SmsComposeView] Failed to load saved state:', error);
@@ -3202,6 +3297,15 @@ class SmsLogsView implements IView {
 
   deactivate(): void {
     console.log('[SmsLogsView] Deactivating SMS logs view');
+    
+    // Save current state to localStorage
+    try {
+      const state = this.saveState();
+      localStorage.setItem('smsLogsState', JSON.stringify(state));
+      console.log('[SmsLogsView] State saved to localStorage');
+    } catch (error) {
+      console.warn('[SmsLogsView] Failed to save state:', error);
+    }
   }
 
   saveState(): any {
@@ -3261,9 +3365,23 @@ class SmsLogsView implements IView {
             appFilter.appendChild(option);
           });
         }
+      } else if (response.status === 403) {
+        console.warn('[SmsLogsView] No permission to load apps list, hiding filter');
+        // Hide the app filter if user doesn't have permissions
+        const appFilterContainer = document.getElementById('smsLogAppFilter')?.parentElement;
+        if (appFilterContainer) {
+          appFilterContainer.style.display = 'none';
+        }
+      } else {
+        console.error('[SmsLogsView] Failed to load apps:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Error loading apps for filter:', error);
+      console.error('[SmsLogsView] Error loading apps for filter:', error);
+      // Hide the filter on error
+      const appFilterContainer = document.getElementById('smsLogAppFilter')?.parentElement;
+      if (appFilterContainer) {
+        appFilterContainer.style.display = 'none';
+      }
     }
   }
 
@@ -4503,16 +4621,35 @@ function updateLogoutButton() {
   
   // Show Dismiss button if:
   // 1. This is a popup window (opened via window.open)
-  // 2. External log viewing (view=email-logs/sms-logs with appId)
+  // Note: External log viewing no longer shows dismiss button
   const isExternalLogViewing = urlAppId && (currentView === 'email-logs' || currentView === 'sms-logs');
   const isFromApp = returnUrl && !isExternalLogViewing; // Coming from app for compose/other views
   
-  if (isPopupWindow || isExternalLogViewing) {
-    // Show as "Dismiss" button for popup windows
+  if (isPopupWindow) {
+    // Show as "Dismiss" button for popup windows only
     logoutBtn.innerHTML = '✖️ Dismiss';
     logoutBtn.title = 'Close this window';
     logoutBtn.style.background = '#6c757d';
     logoutBtn.style.borderColor = '#6c757d';
+  } else if (isExternalLogViewing) {
+    // Show as close "X" button in upper right corner for external log viewing
+    logoutBtn.innerHTML = '✖';
+    logoutBtn.title = 'Close';
+    logoutBtn.style.position = 'fixed';
+    logoutBtn.style.top = '10px';
+    logoutBtn.style.right = '10px';
+    logoutBtn.style.zIndex = '9999';
+    logoutBtn.style.width = '30px';
+    logoutBtn.style.height = '30px';
+    logoutBtn.style.borderRadius = '50%';
+    logoutBtn.style.background = '#6c757d';
+    logoutBtn.style.borderColor = '#6c757d';
+    logoutBtn.style.fontSize = '16px';
+    logoutBtn.style.padding = '0';
+    logoutBtn.style.display = 'flex';
+    logoutBtn.style.alignItems = 'center';
+    logoutBtn.style.justifyContent = 'center';
+    logoutBtn.style.margin = '0';
   } else if (isFromApp) {
     // Show as "Return" button for app integration
     logoutBtn.innerHTML = '↩️ Return';
@@ -5184,9 +5321,18 @@ function setRoleBasedVisibility() {
   const urlParams = new URLSearchParams(window.location.search);
   const returnUrl = urlParams.get('returnUrl') || localStorage.getItem('editorReturnUrl');
   const currentView = urlParams.get('view');
+  const appId = urlParams.get('appId');
   
-  // External log viewing: hide most UI except userPane for return button  
-  const isExternalLogViewing = returnUrl && (currentView === 'email-logs' || currentView === 'sms-logs');
+  // External log viewing: hide most UI except userPane for return button
+  // Check for accessing logs with appId (external app integration) or returnUrl
+  const isExternalLogViewing = appId && (currentView === 'email-logs' || currentView === 'sms-logs');
+  
+  console.log('[UI] External log viewing check:', {
+    returnUrl: !!returnUrl,
+    currentView,
+    appId: !!appId,
+    isExternalLogViewing
+  });
   
   // App integration compose: hide navigation when coming from app for compose
   const isAppIntegratedCompose = returnUrl && !isExternalLogViewing;
@@ -5931,6 +6077,18 @@ async function restorePageState() {
                   } catch (error) {
                     console.warn('[page-state] Failed to restore compose state:', error);
                   }
+                }
+              }
+            } else if (urlView === 'sms-logs') {
+              // Restore SMS logs view state (filters, pagination, etc.)
+              const savedState = localStorage.getItem('smsLogsState');
+              if (savedState) {
+                try {
+                  const state = JSON.parse(savedState);
+                  await viewRegistry.restoreViewState('sms-logs', state);
+                  console.debug('[page-state] Restored SMS logs state');
+                } catch (error) {
+                  console.warn('[page-state] Failed to restore SMS logs state:', error);
                 }
               }
             }
@@ -9625,6 +9783,37 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
     }
     
     message += details;
+    
+    alert(message);
+    
+    // For editors, return to calling app after successful send
+    returnToCallingAppFromCompose();
+}
+
+// Show SMS send summary dialog
+function showSmsSendSummaryDialog(result: any, recipientCount: number) {
+    let message = `📱 SMS sent successfully!\n\n` +
+                  `Recipients: ${recipientCount}\n`;
+    
+    // Add success/failure details if available
+    if (result.successful !== undefined && result.failed !== undefined) {
+        message += `✅ Successful sends: ${result.successful}\n`;
+        if (result.failed > 0) {
+            message += `❌ Failed sends: ${result.failed}\n`;
+        }
+    }
+    
+    // Add message ID if available
+    if (result.messageId) {
+        message += `Message ID: ${result.messageId}\n`;
+    }
+    
+    // Add any additional details
+    if (result.details) {
+        message += `\nDetails: ${result.details}`;
+    } else {
+        message += `\nYour SMS message has been sent to the recipients.`;
+    }
     
     alert(message);
     
