@@ -21,6 +21,10 @@ backups/mailservice_backup_*.sql.gz
 create_sms_config.sql
 restore_smtp_configs.sql
 
+# Runtime JWT keys (should be generated, not committed)
+jwks.json
+keys/jwks.json
+
 # Logs
 logs/
 *.log
