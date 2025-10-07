@@ -7,8 +7,15 @@ declare global {
     }
 }
 
+// Make this file a module
+export {};
+
 // Debug system for comprehensive view flow tracking
 const DEBUG_VIEW_FLOW = true;
+
+// Add a simple test to verify script is loading
+console.log('🚀 Mail Service Frontend Script Loading...');
+console.log('🔍 Debug: Script execution started at', new Date().toISOString());
 
 function debugLog(category: string, message: string, data?: any): void {
   if (DEBUG_VIEW_FLOW) {
@@ -306,13 +313,13 @@ async function addAppSpecificEnhancements(appId: string, appConfig: AppConfig): 
     // Extract parameters that might be app-specific (excluding mail service parameters)
     const mailServiceParams = new Set(['appId', 'token', 'recipients', 'to', 'subject', 'returnUrl', 'body', 'html']);
     
-    console.log('[DEBUG] All URL params:', Object.fromEntries(urlParams.entries()));
+    console.log('[DEBUG] All URL params:', Object.fromEntries(Array.from(urlParams.entries())));
     
-    for (const [key, value] of urlParams.entries()) {
+    urlParams.forEach((value, key) => {
       if (!mailServiceParams.has(key)) {
         appSpecificParams[key] = value;
       }
-    }
+    });
     
     console.log('[DEBUG] App-specific params to pass to menu:', appSpecificParams);
     await loadEmbeddedMenu(appConfig.embeddedMenu, appSpecificParams);
@@ -680,12 +687,8 @@ class TemplateManager {
 
 // Utility function to extract tenant ID from app ID
 function extractTenantFromAppId(appId: string): string | null {
-  // Known app ID to tenant mapping
-  if (appId === 'cmfka688r0001b77ofpgm57ix') {
-    return 'robs-world-tenant';
-  }
-  
-  // Fallback to roleContext or URL parameters
+  // App-specific tenant mapping would go here if needed
+  // For now, fallback to roleContext or URL parameters
   const urlParams = new URLSearchParams(window.location.search);
   return roleContext.contextTenantId || urlParams.get('tenant');
 }
@@ -3650,7 +3653,147 @@ class TinyMCEManager {
   }
 }
 
+/**
+ * Token refresh utilities
+ */
+interface TokenRefreshResponse {
+  token: string;
+  action: string;
+  claims_added: string[];
+}
+
+/**
+ * Extracts the user email from a JWT token payload (even if expired)
+ */
+function extractUserEmailFromToken(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.sub || payload.email || null;
+  } catch (error) {
+    console.debug('[token-refresh] Could not extract email from token:', error);
+    return null;
+  }
+}
+
+/**
+ * Extracts the appId from a JWT token payload (even if expired)
+ */
+function extractAppIdFromToken(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.appId || null;
+  } catch (error) {
+    console.debug('[token-refresh] Could not extract appId from token:', error);
+    return null;
+  }
+}
+
+/**
+ * Attempts to refresh a token silently using the IDP refresh endpoint
+ */
+async function refreshToken(currentToken: string, userEmail?: string): Promise<string | null> {
+  console.log('[token-refresh] ===== REFRESH TOKEN FUNCTION CALLED =====');
+  console.log('[token-refresh] Input parameters:', {
+    hasCurrentToken: !!currentToken,
+    currentTokenPreview: currentToken ? currentToken.substring(0, 50) + '...' : 'none',
+    userEmail: userEmail || 'not provided'
+  });
+  
+  try {
+    console.log('[token-refresh] Starting token refresh process');
+    
+    // Extract the original appId from the current token
+    const originalAppId = extractAppIdFromToken(currentToken);
+    console.log('[token-refresh] Extracted app ID from token:', originalAppId);
+    
+    if (!originalAppId) {
+      console.warn('[token-refresh] Could not extract appId from token');
+      return null;
+    }
+    
+    // Get stored roles from localStorage
+    let storedRoles = localStorage.getItem('userRoles');
+    const originalRoles = storedRoles ? JSON.parse(storedRoles) : [];
+    
+    console.log('[token-refresh] Retrieved stored roles:', originalRoles);
+    console.log('[token-refresh] Refreshing token for appId:', originalAppId, 'with roles:', originalRoles);
+    
+    const idpBaseUrl = 'https://idp.worldspot.org';
+    const refreshUrl = `${idpBaseUrl}/refresh-or-enhance-token.php`;
+    
+    // Send refresh request with roles
+    const requestData: any = {
+      appId: originalAppId,
+      token: currentToken,
+      email: userEmail,
+      claims: {
+        roles: originalRoles // Nest roles under claims as expected by IDP
+      }
+    };
+
+    console.log('[token-refresh] Sending refresh request to:', refreshUrl);
+    console.log('[token-refresh] Request data:', {
+      appId: requestData.appId,
+      hasToken: !!requestData.token,
+      email: requestData.email,
+      rolesCount: requestData.claims?.roles?.length || 0,
+      roles: requestData.claims?.roles
+    });
+    
+    const response = await fetch(refreshUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(requestData),
+      credentials: 'include'
+    });
+
+    console.log('[token-refresh] Refresh response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('[token-refresh] Failed to refresh token:', response.status, response.statusText, errorText);
+      return null;
+    }
+
+    const result: TokenRefreshResponse = await response.json();
+    console.log('[token-refresh] Refresh response received:', {
+      hasToken: !!result.token,
+      action: result.action,
+      claimsAdded: result.claims_added
+    });
+    
+    if (result.token) {
+      console.log('[token-refresh] ✅ Token successfully refreshed');
+      console.log('[token-refresh] New token preview:', result.token.substring(0, 50) + '...');
+      return result.token;
+    } else {
+      console.warn('[token-refresh] ❌ No token in refresh response');
+      return null;
+    }
+  } catch (error) {
+    console.error('[token-refresh] ❌ Error during token refresh:', error);
+    return null;
+  }
+}
+
 async function api(path: string, opts: RequestInit = {}) {
+  console.log(`[api] MAIN API FUNCTION CALLED: ${path}`);
+  return apiWithRetry(path, opts, true);
+}
+
+async function apiWithRetry(path: string, opts: RequestInit = {}, allowRetry: boolean = true): Promise<any> {
+  console.log(`[api] ===== APIWITRETRY CALLED: ${path} =====`);
+  console.log(`[api] Starting request to ${path}, allowRetry=${allowRetry}, authToken exists=${!!authToken}`);
+  
   const headers: Record<string,string> = { 'Content-Type':'application/json', ...(opts.headers as any || {}) };
   
   // Add authorization header if we have a token
@@ -3669,6 +3812,8 @@ async function api(path: string, opts: RequestInit = {}) {
     } catch (e) {
       console.debug(`[api] Using token for ${path} (parse failed):`, { tokenStart: authToken.substring(0, 20) + '...' });
     }
+  } else {
+    console.log(`[api] NO AUTH TOKEN available for ${path}`);
   }
   
   // Also add token as URL parameter to support enhanced authentication
@@ -3678,11 +3823,67 @@ async function api(path: string, opts: RequestInit = {}) {
     finalPath = `${path}${separator}token=${encodeURIComponent(authToken)}`;
   }
   
-  const res = await fetch(finalPath, { ...opts, headers });
+  let res;
+  try {
+    console.log(`[api] Making fetch request to: ${finalPath}`);
+    res = await fetch(finalPath, { ...opts, headers });
+    console.log(`[api] Fetch completed with status: ${res.status}`);
+  } catch (fetchError) {
+    console.error(`[api] Fetch error for ${path}:`, fetchError);
+    throw fetchError;
+  }
+  
   if (!res.ok) {
-    // Handle 401 Unauthorized by redirecting to IDP
+    console.log(`[api] Request failed with status ${res.status} for path: ${path}`);
+    console.log(`[api] Response details:`, { status: res.status, statusText: res.statusText });
+    
+    // Handle 401 Unauthorized by attempting silent token refresh first
     if (res.status === 401) {
-      console.log('🔒 API returned 401 Unauthorized, redirecting to IDP for re-authentication...');
+      console.log('🔒 API returned 401 Unauthorized');
+      console.log(`[api] Refresh conditions - allowRetry: ${allowRetry}, authToken exists: ${!!authToken}`);
+      
+      if (allowRetry && authToken) {
+        console.log('🔄 Attempting silent token refresh...');
+        
+        try {
+          // Try to extract user email from current token
+          const userEmail = extractUserEmailFromToken(authToken);
+          console.log(`[api] Extracted user email: ${userEmail}`);
+          
+          // Store original token for debugging
+          const originalToken = authToken;
+          console.log(`[api] Original token preview: ${originalToken.substring(0, 50)}...`);
+          
+          // Attempt silent token refresh
+          console.log('🔄 Calling refreshToken function...');
+          const newToken = await refreshToken(authToken, userEmail || undefined);
+          console.log(`[api] refreshToken returned: ${!!newToken}`);
+          
+          if (newToken) {
+            console.log('✅ Token successfully refreshed, retrying original request');
+            console.log(`[api] New token preview: ${newToken.substring(0, 50)}...`);
+            
+            // Update stored token
+            authToken = newToken;
+            localStorage.setItem('authToken', authToken);
+            
+            // Retry the original request with the new token
+            console.log(`[api] Retrying original request to ${path}...`);
+            return apiWithRetry(path, opts, false); // Prevent infinite retry loop
+          } else {
+            console.log('❌ Silent token refresh failed, will redirect to IDP');
+          }
+        } catch (refreshError) {
+          console.error('❌ Error during token refresh:', refreshError);
+        }
+      } else {
+        console.log(`[api] Not attempting refresh - allowRetry: ${allowRetry}, hasToken: ${!!authToken}`);
+      }
+    }
+    
+    // If we reach here, either not a 401 or refresh failed
+    if (res.status === 401) {
+      console.log('🔒 Final 401 handling - redirecting to IDP for re-authentication...');
       
       // Clear expired token
       authToken = null;
@@ -3698,7 +3899,15 @@ async function api(path: string, opts: RequestInit = {}) {
         
         const redirect = new URL(idp);
         redirect.searchParams.set('return', ret);
-        redirect.searchParams.set('appId', 'cmfka688r0001b77ofpgm57ix');
+        
+        // Extract appId from the expired token if available
+        if (authToken) {
+          const appId = extractAppIdFromToken(authToken);
+          if (appId) {
+            redirect.searchParams.set('appId', appId);
+          }
+        }
+        
         window.location.href = redirect.toString();
         return; // Don't throw error, redirect instead
       }
@@ -3707,6 +3916,8 @@ async function api(path: string, opts: RequestInit = {}) {
     const tx = await res.text();
     throw new Error(tx || res.statusText);
   }
+  
+  console.log(`[api] Request to ${path} succeeded`);
   return res.json();
 }
 
@@ -3781,8 +3992,10 @@ if (templateForm) {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const fd = new FormData(form);
+    const extractedAppId = authToken ? extractAppIdFromToken(authToken) : null;
+    const appIdValue = state.user?.appId || extractedAppId || 'unknown';
     const payload: any = {
-      appId: 'cmfka688r0001b77ofpgm57ix', // Use ReTree Hawaii app ID
+      appId: appIdValue,
       title: fd.get('title') as string,
       version: Number(fd.get('version')),
       subject: fd.get('subject'),
@@ -4254,10 +4467,20 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   statusEl.textContent = 'Verifying...';
   authToken = token; localStorage.setItem('authToken', authToken);
   try {
-    state.user = await api('/me');
+    state.user = await api('/me'); 
     if (!state.user) throw new Error('No user context');
     
-    statusEl.textContent = 'OK';
+    // Store user roles for token refresh
+    if (state.user.roles) {
+      localStorage.setItem('userRoles', JSON.stringify(state.user.roles));
+      console.log('[auth] Stored user roles for refresh:', state.user.roles);
+    }
+    
+    // Store user roles for token refresh
+    if (state.user.roles) {
+      localStorage.setItem('userRoles', JSON.stringify(state.user.roles));
+      console.log('[auth] Stored user roles for refresh:', state.user.roles);
+    }    statusEl.textContent = 'OK';
     setTimeout(()=> { statusEl.textContent=''; }, 800);
     onAuthenticated(false); // Manual login form - not from IDP
   } catch (err:any) {
@@ -4384,7 +4607,13 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
     const redirect = new URL(idp);
     redirect.searchParams.set('return', ret);
     // Always include the default ReTree Hawaii appId for tenant admin context
-    redirect.searchParams.set('appId', 'cmfka688r0001b77ofpgm57ix');
+    // Extract appId from current token if available
+    if (authToken) {
+      const appId = extractAppIdFromToken(authToken);
+      if (appId) {
+        redirect.searchParams.set('appId', appId);
+      }
+    }
     console.log('🔄 Logout redirect URL:', redirect.toString());
     window.location.href = redirect.toString();
   } else {
@@ -5392,7 +5621,8 @@ async function init() {
         // Forward multi-tenant/app hints to IDP so they are embedded in the token
         const fTenant = tenantId || tenantHint || '';
         const fClient = (clientIdHint || localStorage.getItem('appClientIdHint') || '') as string;
-        const fAppId = (appId || appIdHint || localStorage.getItem('appIdHint') || 'cmfka688r0001b77ofpgm57ix') as string; // Default to ReTree Hawaii app
+        const extractedAppId = authToken ? extractAppIdFromToken(authToken) : null;
+        const fAppId = (appId || appIdHint || localStorage.getItem('appIdHint') || extractedAppId || 'unknown') as string;
         
         console.log('[IDP-DEBUG] Redirect params:', { 
           tenantId, tenantHint, appId, appIdHint,
