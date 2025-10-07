@@ -1,0 +1,14 @@
+/var/log/mail-service/mail-service.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    su apache web-dev
+    postrotate
+        # Send HUP signal to reload logs if needed
+        systemctl reload-or-restart mail-service > /dev/null 2>&1 || true
+    endscript
+}

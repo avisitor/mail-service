@@ -1,0 +1,31 @@
+[Unit]
+Description=Mail Service - Email and SMS API Server
+Documentation=https://github.com/avisitor/mail-service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=apache
+Group=web-dev
+WorkingDirectory=/var/www/html/mail-service
+Environment=NODE_ENV=production
+Environment=PORT=3100
+Environment=LOG_LEVEL=info
+ExecStart=/usr/bin/node dist/src/server.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/mail-service/mail-service.log
+StandardError=append:/var/log/mail-service/mail-service.log
+SyslogIdentifier=mail-service
+
+# Security settings (minimal for compatibility)
+NoNewPrivileges=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
