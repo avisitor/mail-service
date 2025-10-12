@@ -4,6 +4,15 @@ import { processEmailTemplate, RecipientContext } from '../../utils/templates.js
 import { getBatchConfig, globalRateTracker, sleep } from '../../config/batch.js';
 import { nanoid } from 'nanoid';
 
+// Debug configuration
+const DEBUG_WORKER = process.env.DEBUG_WORKER === 'true' || process.env.NODE_ENV === 'development';
+
+function debugLog(message: string, ...args: any[]) {
+  if (DEBUG_WORKER) {
+    console.log(message, ...args);
+  }
+}
+
 export interface WorkerResult {
   jobsProcessed: number;
   jobsSent: number;
@@ -201,10 +210,16 @@ async function processJob(job: any): Promise<void> {
     const subject = job.subject || 'No Subject';
     const html = job.message || undefined;
     
+    // Debug: Show actual content being sent
+    debugLog(`[Worker] Job ${job.jobId} content preview:`, {
+      recipient: recipient.email,
+      messagePreview: html ? html.substring(240, 300) : 'no html'
+    });
+    
     // Check if this is a test email by looking for TEST_MODE: prefix in host field
     const isTestEmail = job.host?.startsWith('TEST_MODE:') || false;
     
-    console.log(`[Worker] Sending email to ${recipient.email}:`, {
+    debugLog(`[Worker] Sending email to ${recipient.email}:`, {
       subject: subject,
       hasHtml: !!html,
       isTestEmail: isTestEmail
@@ -219,7 +234,7 @@ async function processJob(job: any): Promise<void> {
       testEmail: isTestEmail // Use detected test mode
     });
 
-    console.log(`[Worker] Email delivery result for job ${job.jobId}:`, {
+    debugLog(`[Worker] Email delivery result for job ${job.jobId}:`, {
       messageId: deliveryResult.messageId,
       status: deliveryResult.status,
       accepted: deliveryResult.accepted,
@@ -250,13 +265,13 @@ async function processJob(job: any): Promise<void> {
         data: {
           messageId: messageId,
           appId: job.appId,
-          subject: job.subject,
+          subject: subject,
           senderName: job.senderName,
           senderEmail: job.senderEmail,
           host: job.host,
           username: job.username,
           recipients: JSON.stringify([recipient]),
-          message: job.message
+          message: html || job.message
         }
       });
     } catch (maillogError: any) {
@@ -268,13 +283,13 @@ async function processJob(job: any): Promise<void> {
           data: {
             messageId: messageId,
             appId: job.appId,
-            subject: job.subject,
+            subject: subject,
             senderName: job.senderName,
             senderEmail: job.senderEmail,
             host: job.host,
             username: job.username,
             recipients: JSON.stringify([recipient]),
-            message: job.message
+            message: html || job.message
           }
         });
       } else {
@@ -319,7 +334,7 @@ export async function createEmailJobs(params: {
   const prisma = getPrisma();
   const { nanoid } = await import('nanoid');
   
-  console.log('[createEmailJobs] Creating jobs:', {
+  debugLog('[createEmailJobs] Creating jobs:', {
     groupId: params.groupId,
     appId: params.appId,
     subject: params.subject,
@@ -357,7 +372,7 @@ export async function createEmailJobs(params: {
     data: jobs
   });
   
-  console.log('[createEmailJobs] Created', result.count, 'jobs with IDs:', jobs.map(j => j.jobId));
+  debugLog('[createEmailJobs] Created', result.count, 'jobs with IDs:', jobs.map(j => j.jobId));
 
   return {
     jobIds: jobs.map(job => job.jobId),
