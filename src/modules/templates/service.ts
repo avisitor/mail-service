@@ -15,12 +15,12 @@ export async function createTemplate(data: any) {
   return prisma.template.create({ data: templateData });
 }
 
-export async function updateTemplate(id: string, data: TemplateUpdateInput) {
+export async function updateTemplate(id: number, data: TemplateUpdateInput) {
   const prisma = getPrisma();
   return prisma.template.update({ where: { id }, data: { ...data } });
 }
 
-export async function getTemplate(id: string) {
+export async function getTemplate(id: number) {
   const prisma = getPrisma();
   return prisma.template.findUnique({ where: { id } });
 }
@@ -39,7 +39,7 @@ export async function listTemplates(tenantId: string, appId?: string) {
   return validTemplates;
 }
 
-export async function renderTemplate(id: string, context: Record<string, any>) {
+export async function renderTemplate(id: number, context: Record<string, any>) {
   const tpl = await getTemplate(id);
   if (!tpl) return null;
   
