@@ -21,10 +21,10 @@ describe('Template Evaluation and Variable Substitution', () => {
   }
 
   let app: any;
-  let templateId: string;
+  let templateId: number;
   let testTenantId = 'test-template-eval-tenant';
   let testAppId = 'test-template-eval-app';
-  let createdTemplateIds: string[] = [];
+  let createdTemplateIds: number[] = [];
 
   beforeEach(async () => {
     app = buildApp();
