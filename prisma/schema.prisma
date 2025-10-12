@@ -35,23 +35,25 @@ model App {
 }
 
 model Template {
-  id           String         @id @default(cuid())
+  id           Int            @id @default(autoincrement())
   version      Int
   subject      String?        @db.MediumText
   isActive     Boolean        @default(true)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @default(now()) @updatedAt
-  appId        String         @default("retreehawaii")
+  appId        String         // No default - must be explicitly provided
   content      String?        @db.MediumText
   title        String?        @db.VarChar(64)
   MessageGroup MessageGroup[]
+
+  @@index([appId], map: "Template_appId_idx")
 }
 
 model MessageGroup {
   id                  String      @id @default(cuid())
   tenantId            String
   appId               String
-  templateId          String?
+  templateId          Int?
   subject             String
   bodyOverrideHtml    String?
   bodyOverrideText    String?
