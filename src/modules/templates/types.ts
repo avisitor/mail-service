@@ -9,7 +9,7 @@ export const templateCreateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const templateUpdateSchema = templateCreateSchema.partial().extend({ id: z.string() });
+export const templateUpdateSchema = templateCreateSchema.partial();
 
 export type TemplateCreateInput = z.infer<typeof templateCreateSchema>;
 export type TemplateUpdateInput = z.infer<typeof templateUpdateSchema>;
