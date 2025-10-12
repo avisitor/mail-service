@@ -922,9 +922,16 @@ export function buildApp() {
       // If templateId is provided, fetch template content
       if (templateId) {
         console.log('[/send-now] Using template:', templateId);
+        
+        // Convert templateId to number since our Template.id is now INT
+        const templateIdInt = typeof templateId === 'string' ? parseInt(templateId, 10) : templateId;
+        if (isNaN(templateIdInt)) {
+          return reply.badRequest(`Invalid templateId: '${templateId}'. Must be a valid number.`);
+        }
+        
         const template = await prisma.template.findFirst({
           where: { 
-            id: templateId,
+            id: templateIdInt,
             isActive: true
           }
         });
