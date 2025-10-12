@@ -43,7 +43,9 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
 
   app.get('/templates/:id', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const { id } = req.params as any;
-    const tpl = await getTemplate(id);
+    const templateId = parseInt(id, 10);
+    if (isNaN(templateId)) return reply.badRequest('Invalid template ID');
+    const tpl = await getTemplate(templateId);
     if (!tpl) return reply.notFound();
     return tpl;
   });
@@ -52,10 +54,12 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
     // @ts-ignore
     if (!hasEffectiveTenantAdminRole(req.userContext)) return reply.forbidden();
     const { id } = req.params as any;
+    const templateId = parseInt(id, 10);
+    if (isNaN(templateId)) return reply.badRequest('Invalid template ID');
     // minimal update; ignores in-memory path (not tracked) except set isActive flag
     try {
       const prisma = (await import('../../db/prisma.js')).getPrisma();
-      const updated = await prisma.template.update({ where: { id }, data: { isActive: false } });
+      const updated = await prisma.template.update({ where: { id: templateId }, data: { isActive: false } });
       return updated;
     } catch (e: any) {
       return reply.badRequest(e.message);
@@ -66,6 +70,8 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
     // @ts-ignore
     if (!hasEffectiveTenantAdminRole(req.userContext)) return reply.forbidden();
     const { id } = req.params as any;
+    const templateId = parseInt(id, 10);
+    if (isNaN(templateId)) return reply.badRequest('Invalid template ID');
     const { title, subject, content } = req.body as any;
     
     if (!title || !content) {
@@ -73,7 +79,7 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
     }
     
     try {
-      const updated = await updateTemplate(id, { id, title, subject, content });
+      const updated = await updateTemplate(templateId, { title, subject, content });
       if (!updated) return reply.notFound();
       return updated;
     } catch (e: any) {
@@ -94,8 +100,10 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
 
   app.post('/templates/:id/render', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const { id } = req.params as any;
+    const templateId = parseInt(id, 10);
+    if (isNaN(templateId)) return reply.badRequest('Invalid template ID');
     const ctx = (req.body as any)?.context || {};
-    const rendered = await renderTemplate(id, ctx);
+    const rendered = await renderTemplate(templateId, ctx);
     if (!rendered) return reply.notFound();
     return rendered;
   });
