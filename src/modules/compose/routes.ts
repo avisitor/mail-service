@@ -33,10 +33,12 @@ export async function registerComposeRoutes(app: FastifyInstance) {
   // Get template by ID
   app.get('/api/template/:id', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const { id } = req.params as any;
+    const templateId = parseInt(id, 10);
+    if (isNaN(templateId)) return reply.badRequest('Invalid template ID');
     
     const prisma = getPrisma();
     const template = await prisma.template.findUnique({
-      where: { id },
+      where: { id: templateId },
       select: {
         id: true,
         title: true,
