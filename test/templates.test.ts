@@ -15,7 +15,7 @@ function generateTestId(testCase: string, entityType: string): string {
 }
 
 describe('templates (db)', () => {
-  let createdTemplateId: string | null = null;
+  let createdTemplateId: number | null = null;
 
   if (!dbValid) {
     it.skip('skipped because DATABASE_URL is not mysql://', () => {});
