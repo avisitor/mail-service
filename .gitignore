@@ -31,6 +31,7 @@ logs/
 
 # OS
 .DS_Store
+**/*~
 
 # Prisma / DB
 prisma/.env
