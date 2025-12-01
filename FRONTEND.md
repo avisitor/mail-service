@@ -33,3 +33,4 @@ Copies already-compiled JavaScript from dist to src (useful after `npm run build
 - The `main.js` file is auto-generated and will be overwritten
 - Run `npm run build:frontend` after making changes to see them in the UI
 - The server serves files directly from `src/frontend/` in development mode
+- App styling metadata lives in `src/frontend/keys/apps.json`, but each entry can now provide a `configUrl` pointing to a remote JSON file hosted by the application itself. When `configUrl` is available, mail-service fetches that file, merges the resulting values with the local entry, and uses the final `css_url`, `banner`, `embeddedMenu`, etc. This lets applications own their layout definitions without hard-coding every detail into the central repo.

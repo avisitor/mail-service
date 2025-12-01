@@ -1,4 +1,4 @@
-body { font-family: system-ui, Arial, sans-serif; margin:0; background:#111; color:#eee; }
+body { font-family: system-ui, Arial, sans-serif; margin:0; background:#fff; background-image:none; color:#333; }
 
 /* Temporarily disable embedded menu layout adjustments for debugging */
 /* body.has-embedded-menu {
@@ -7,8 +7,8 @@ body { font-family: system-ui, Arial, sans-serif; margin:0; background:#111; col
 
 header { 
   padding: 12px 20px; 
-  background: #181818; 
-  border-bottom: 1px solid #333; 
+  background: transparent; 
+  border-bottom: 1px solid #ddd; 
   display: flex; 
   flex-direction: column;
   gap: 12px; 
@@ -25,7 +25,7 @@ header {
 
 #viewFunction {
   font-size: 1em !important;
-  color: #999 !important;
+  color: #666 !important;
   margin: 0 !important;
   font-weight: 400 !important;
 }
@@ -156,13 +156,13 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .status { min-height:18px; font-size:0.7rem; margin-top:6px; color:#8ab4ff; white-space:pre-wrap; }
 #templateList { margin-top:12px; font-size:0.75rem; line-height:1.3; }
 .preview { margin-top: 10px; }
-.code { background:#151515; padding:6px 8px; border:1px solid #333; border-radius:4px; font-family:monospace; font-size:0.75rem; white-space:pre-wrap; }
-iframe { width:100%; min-height:180px; background:#fff; border:1px solid #333; border-radius:4px; }
-.env { font-size:0.65rem; color:#aaa; }
+.code { background:#f5f5f5; padding:6px 8px; border:1px solid #ddd; border-radius:4px; font-family:monospace; font-size:0.75rem; white-space:pre-wrap; color:#333; }
+iframe { width:100%; min-height:180px; background:#fff; border:1px solid #ddd; border-radius:4px; }
+.env { font-size:0.65rem; color:#666; }
 
 /* Flash invalid JSON / fields */
 .invalid { outline:2px solid #ff5555 !important; animation:flashInvalid 1.1s ease; }
-@keyframes flashInvalid { 0% { background:#401818; } 50% { background:#1e1e1e; } 100% { background:#1e1e1e; } }
+@keyframes flashInvalid { 0% { background:#ffe0e0; } 50% { background:#fff; } 100% { background:#fff; } }
 
 /* Service type field switching animations */
 #smtpFields, #sesFields {
@@ -189,14 +189,14 @@ fieldset {
 }
 
 /* List rows for templates, groups, events */
-.tplRow, .grpRow, .evtRow { display:flex; align-items:center; gap:6px; padding:3px 4px; border-bottom:1px solid #222; }
+.tplRow, .grpRow, .evtRow { display:flex; align-items:center; gap:6px; padding:3px 4px; border-bottom:1px solid #e0e0e0; }
 .tplRow:last-child, .grpRow:last-child, .evtRow:last-child { border-bottom:none; }
 .tplRow button.loadTpl, .grpRow button.loadGroup { background:#5050ff; color:#fff; padding:2px 6px; font-size:0.6rem; border-radius:4px; font-weight:500; }
 .tplRow button.loadTpl:hover, .grpRow button.loadGroup:hover { background:#6a6aff; }
 
 /* Sub sections (tenant/app selectors) */
 .sub { margin-top:12px; font-size:0.7rem; }
-.sub select { background:#121212; color:#eee; border:1px solid #333; border-radius:4px; padding:4px 6px; font-size:0.75rem; }
+.sub select { background:#fff; color:#333; border:1px solid #ddd; border-radius:4px; padding:4px 6px; font-size:0.75rem; }
 
 /* Scroll containers styling (override .code for lists) */
 #groupsList.code, #eventsList.code { font-size:0.65rem; line-height:1.25; }

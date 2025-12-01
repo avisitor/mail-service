@@ -1,33 +1,9 @@
 {
   "cmfka688r0001b77ofpgm57ix": {
-    "title": "ReTree Hawaii",
-    "description": "ReTree Hawaii environmental project management",
-    "css_url": "https://retree-hawaii.worldspot.org/auth/retree-hawaii-mail.css",
-    "banner": {
-      "id": "retree-banner",
-      "className": "retree-banner",
-      "html": "<div class=\"banner-content\"><span class=\"banner-text\">ReTree Hawaii<br>Lā Ho'oulu Pae Moku</span></div><div class=\"retree-nav-buttons\"><a href=\"https://retree-hawaii.worldspot.org/planting/\"><div class=\"homeButton\">Home</div></a><a href=\"https://retree-hawaii.worldspot.org/\"><div class=\"frontButton\">Front</div></a></div>"
-    }
+    "configUrl": "https://retree-hawaii.worldspot.org/planting/auth/mail-config.json"
   },
   "outings-app-id": {
-    "title": "Outings",
-    "description": "Outing management and scheduling application",
-    "css_url": "https://outings.worldspot.org/auth/outings-mail.css",
-    "embeddedMenu": {
-      "url": "https://outings.worldspot.org/api/menu-component.php",
-      "targetSelector": "[data-embedded-menu]",
-      "replaceTarget": false
-    }
-  },
-  "cmfm6bqcf0001ylk8lx4pyd6n": {
-    "title": "ReTree Hawaii",
-    "description": "ReTree Hawaii environmental project management (alternate instance)",
-    "css_url": "https://retree-hawaii.worldspot.org/auth/retree-hawaii-mail.css",
-    "banner": {
-      "id": "retree-banner",
-      "className": "retree-banner",
-      "html": "<div class=\"banner-content\"><span class=\"banner-text\">ReTree Hawaii<br>Lā Ho'oulu Pae Moku</span></div><div class=\"retree-nav-buttons\"><a href=\"https://retree-hawaii.worldspot.org/planting/\"><div class=\"homeButton\">Home</div></a><a href=\"https://retree-hawaii.worldspot.org/\"><div class=\"frontButton\">Front</div></a></div>"
-    }
+    "configUrl": "https://outings.worldspot.org/mail-config.json"
   },
   "cmfm6bqcj0003ylk8qbr4e9hb": {
     "title": "Outings",

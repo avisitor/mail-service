@@ -207,6 +207,7 @@ interface AppConfig {
   title?: string;
   description?: string;
   css_url?: string;
+  configUrl?: string;
   banner?: {
     id?: string;
     className?: string;
@@ -239,21 +240,74 @@ async function loadAppsConfig(): Promise<AppsConfig> {
   }
 }
 
+async function loadRemoteAppConfig(configUrl: string): Promise<Partial<AppConfig> | null> {
+  try {
+    const resolvedUrl = new URL(configUrl, window.location.href).toString();
+    console.log('[CustomCSS] Loading remote config JSON from:', resolvedUrl);
+    const response = await fetch(resolvedUrl, {
+      method: 'GET',
+      credentials: 'omit',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (!response.ok) {
+      console.warn('[CustomCSS] Failed to load remote config:', resolvedUrl, response.status);
+      return null;
+    }
+
+    const remoteConfig = await response.json();
+    console.log('[CustomCSS] Remote config loaded:', resolvedUrl, remoteConfig);
+    return remoteConfig;
+  } catch (error) {
+    console.warn('[CustomCSS] Error loading remote app config:', configUrl, error);
+    return null;
+  }
+}
+
+async function resolveAppConfig(appId: string): Promise<AppConfig | null> {
+  const appsConfig = await loadAppsConfig();
+  const baseConfig = appsConfig[appId];
+  if (!baseConfig) {
+    console.warn(`[CustomCSS] No config entry found for appId ${appId}`);
+    return null;
+  }
+
+  if (baseConfig.configUrl) {
+    const remoteConfig = await loadRemoteAppConfig(baseConfig.configUrl);
+    if (remoteConfig) {
+      return {
+        ...baseConfig,
+        ...remoteConfig,
+        configUrl: baseConfig.configUrl
+      };
+    }
+  }
+
+  return baseConfig;
+}
+
 async function loadCustomCSS(appId: string): Promise<void> {
+  console.log(`[CustomCSS] loadCustomCSS called with appId: ${appId}`);
+  
   if (!appId) {
     console.debug('[CustomCSS] No appId provided, using default styling');
     return;
   }
 
   try {
-    const appsConfig = await loadAppsConfig();
-    const appConfig = appsConfig[appId];
-    
-    if (!appConfig?.css_url) {
-      console.debug(`[CustomCSS] No custom CSS configured for app: ${appId}`);
+    console.log('[CustomCSS] Resolving app config...');
+    const appConfig = await resolveAppConfig(appId);
+    if (!appConfig) {
+      console.warn(`[CustomCSS] No configuration available for app: ${appId}`);
       return;
     }
 
+    console.log(`[CustomCSS] Resolved config for ${appId}:`, appConfig);
+    if (!appConfig.css_url) {
+      console.warn(`[CustomCSS] No custom CSS configured for app: ${appId}`);
+      return;
+    }
+  
     console.log(`[CustomCSS] Loading custom CSS for ${appId}: ${appConfig.css_url}`);
     
     // Create and inject CSS link
@@ -385,11 +439,9 @@ async function loadEmbeddedMenu(menuConfig: any, appParams: Record<string, strin
 }
 
 function addBanner(bannerConfig: any): void {
-  // Remove existing banner if present
-  const existingBanner = document.querySelector('[id$="-banner"]');
-  if (existingBanner) {
-    existingBanner.remove();
-  }
+  // Remove existing banner(s) that match either the legacy default or any id ending with "-banner"
+  const bannersToRemove = document.querySelectorAll('#banner, #app-banner, [id$="-banner"]');
+  bannersToRemove.forEach(existingBanner => existingBanner.remove());
   
   // Remove existing after-banner content
   const existingAfterBanner = document.querySelector('.retree-nav-buttons, .outings-nav-buttons');
@@ -721,13 +773,26 @@ class ComposeView implements IView {
   async activate(): Promise<void> {
     console.log('[ComposeView] Activating compose view');
     
-    // Get appId from URL parameters first
+    // Get parameters from fragment first (for POST-redirect scenarios), then query string
+    const fragment = window.location.hash;
+    let fragmentParams: URLSearchParams | null = null;
+    if (fragment && fragment.startsWith('#')) {
+      fragmentParams = new URLSearchParams(fragment.substring(1));
+      console.log('[ComposeView] Found fragment parameters');
+    }
+    
     const urlParams = new URLSearchParams(window.location.search);
-    const appIdFromUrl = urlParams.get('appId');
-    const recipientsFromUrl = urlParams.get('recipients');
-    const returnUrlFromUrl = urlParams.get('returnUrl');
-    const subjectFromUrl = urlParams.get('subject');
-    const participantDataFromUrl = urlParams.get('participantData');
+    
+    // Helper to get parameter from fragment first, then query string
+    const getParam = (key: string): string | null => {
+      return fragmentParams?.get(key) || urlParams.get(key);
+    };
+    
+    const appIdFromUrl = getParam('appId');
+    const recipientsFromUrl = getParam('recipients');
+    const returnUrlFromUrl = getParam('returnUrl');
+    const subjectFromUrl = getParam('subject');
+    const participantDataFromUrl = getParam('participantData');
     
     // Set currentAppId for this view
     if (appIdFromUrl) {
@@ -791,6 +856,13 @@ class ComposeView implements IView {
       
       console.log('[ComposeView] Using appId from URL:', appIdFromUrl);
       
+      // Load custom CSS for this app if not already loaded
+      try {
+        await loadCustomCSS(appIdFromUrl);
+      } catch (error) {
+        console.warn('[ComposeView] Failed to load custom CSS:', error);
+      }
+      
       // Update URL to clean up parameters while preserving appId
       const url = new URL(window.location.href);
       url.searchParams.set('appId', appIdFromUrl);
@@ -825,11 +897,16 @@ class ComposeView implements IView {
         console.log('[ComposeView] Populated composeState.recipientsData with participant context:', this.participantContextData.length, 'recipients');
       }
     } else {
-      // Check for saved state
+      // Check for appId from authentication context (state.user.appId)
+      // This is set when user authenticates via IDP
+      const userAppId = state.user?.appId;
+      
+      // Then check for saved state
       const savedPageState = localStorage.getItem('pageState');
       let savedAppId = null;
       
-      console.log('[ComposeView] No appId in URL, checking saved page state');
+      console.log('[ComposeView] No appId in URL, checking authentication context and saved page state');
+      console.log('[ComposeView] User appId from authentication:', userAppId);
       
       if (savedPageState) {
         try {
@@ -841,22 +918,32 @@ class ComposeView implements IView {
         }
       }
       
-      if (savedAppId) {
-        this.currentAppId = savedAppId;
-        this.templateManager.setAppId(savedAppId);
+      // Prefer user's authenticated appId over saved state
+      const appIdToUse = userAppId || savedAppId;
+      
+      if (appIdToUse) {
+        this.currentAppId = appIdToUse;
+        this.templateManager.setAppId(appIdToUse);
+        
+        // Load custom CSS for this app if not already loaded
+        try {
+          await loadCustomCSS(appIdToUse);
+        } catch (error) {
+          console.warn('[ComposeView] Failed to load custom CSS:', error);
+        }
         
         // Update URL to include the appId
         const url = new URL(window.location.href);
-        url.searchParams.set('appId', savedAppId);
+        url.searchParams.set('appId', appIdToUse);
         history.replaceState(null, '', url.toString());
         
-        console.log('[ComposeView] Loading data for saved appId:', savedAppId);
+        console.log('[ComposeView] Loading data for appId:', appIdToUse, '(source:', userAppId ? 'authentication' : 'saved state', ')');
         await this.loadComposeData();
         this.setupComposeEventListeners();
         await this.initTinyMCE();
         this.updateButtonVisibility();
       } else {
-        console.warn('[ComposeView] No appId found in URL or saved state');
+        console.warn('[ComposeView] No appId found in URL, authentication context, or saved state');
       }
     }
   }
@@ -1842,19 +1929,54 @@ class SmsComposeView implements IView {
 
   async activate(): Promise<void> {
     console.log('[SmsComposeView] Activating SMS compose view');
+    console.log('[SmsComposeView] Current URL:', window.location.href);
+    console.log('[SmsComposeView] Fragment:', window.location.hash);
     
-    // Get appId from URL parameters first
+    // Check if data is in URL fragment (from POST redirects)
+    const fragment = window.location.hash;
+    if (fragment && fragment.startsWith('#')) {
+      const fragmentParams = new URLSearchParams(fragment.substring(1));
+      
+      console.log('[SmsComposeView] Fragment params:', Array.from(fragmentParams.entries()));
+      
+      // If fragment has view parameter, move all params to query string
+      if (fragmentParams.has('view')) {
+        console.log('[SmsComposeView] Found view in fragment, moving all params to query string');
+        
+        const queryParams = new URLSearchParams(window.location.search);
+        
+        // Copy all fragment params to query string
+        for (const [key, value] of fragmentParams.entries()) {
+          console.log(`[SmsComposeView] Setting param ${key}:`, value.substring(0, 100));
+          queryParams.set(key, value);
+        }
+        
+        // Update URL without fragment
+        const newUrl = `${window.location.pathname}?${queryParams.toString()}`;
+        history.replaceState(null, '', newUrl);
+        console.log('[SmsComposeView] Moved fragment params to query string');
+      } else {
+        console.log('[SmsComposeView] Fragment exists but no view parameter');
+      }
+    } else {
+      console.log('[SmsComposeView] No fragment in URL');
+    }
+    
+    // Get parameters from URL
     const urlParams = new URLSearchParams(window.location.search);
     const appIdFromUrl = urlParams.get('appId');
-    const smsSessionKey = urlParams.get('smsSession');
+    
+    // Re-read URL params to get the latest values
+    const currentParams = new URLSearchParams(window.location.search);
+    const currentAppId = currentParams.get('appId');
     
     // Set currentAppId for this view
-    if (appIdFromUrl) {
-      this.currentAppId = appIdFromUrl;
+    if (currentAppId) {
+      this.currentAppId = currentAppId;
       
       // Load custom CSS for this app if not already loaded
       try {
-        await loadCustomCSS(appIdFromUrl);
+        await loadCustomCSS(currentAppId);
       } catch (error) {
         console.warn('[SmsComposeView] Failed to load custom CSS:', error);
       }
@@ -1867,46 +1989,10 @@ class SmsComposeView implements IView {
     }
     
     // Check URL parameters for SMS data first
-    let phoneNumbersFromUrl = urlParams.get('phoneNumbers');
-    let messageFromUrl = urlParams.get('message');
+    let phoneNumbersFromUrl = currentParams.get('phoneNumbers');
+    let messageFromUrl = currentParams.get('message');
     
-    // If not found in URL params, check fragment
-    if (!phoneNumbersFromUrl || !messageFromUrl) {
-      const fragment = window.location.hash;
-      if (fragment.startsWith('#sms-')) {
-        const fragmentParams = new URLSearchParams(fragment.slice(5)); // Remove '#sms-'
-        if (!phoneNumbersFromUrl) phoneNumbersFromUrl = fragmentParams.get('phoneNumbers');
-        if (!messageFromUrl) messageFromUrl = fragmentParams.get('message');
-        
-        console.log('[SmsComposeView] Found SMS data in fragment - phoneNumbers:', phoneNumbersFromUrl, 'message:', messageFromUrl);
-        
-        // Clean up the fragment
-        history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-    }
-    
-    // If still not found and we have a session key, fetch from server
-    if ((!phoneNumbersFromUrl || !messageFromUrl) && smsSessionKey) {
-      try {
-        const response = await fetch(`/api/sms/session/${smsSessionKey}`);
-        if (response.ok) {
-          const sessionData = await response.json();
-          if (!phoneNumbersFromUrl) phoneNumbersFromUrl = sessionData.phoneNumbers;
-          if (!messageFromUrl) messageFromUrl = sessionData.message;
-          
-          console.log('[SmsComposeView] Found SMS data in session - phoneNumbers:', phoneNumbersFromUrl, 'message:', messageFromUrl);
-          
-          // Clean up the session parameter from URL
-          const cleanUrl = new URL(window.location.href);
-          cleanUrl.searchParams.delete('smsSession');
-          history.replaceState(null, '', cleanUrl.toString());
-        }
-      } catch (error) {
-        console.warn('[SmsComposeView] Failed to fetch SMS session data:', error);
-      }
-    }
-    
-    console.log('[SmsComposeView] URL params - appId:', appIdFromUrl, 'phoneNumbers:', phoneNumbersFromUrl);
+    console.log('[SmsComposeView] URL params - appId:', currentAppId, 'phoneNumbers:', phoneNumbersFromUrl);
     
     // Handle phone numbers data if provided
     if (phoneNumbersFromUrl) {
@@ -4533,8 +4619,22 @@ function onAuthenticated(cameFromIdp: boolean = false) {
     debugLog('VIEW-FLOW', 'Removed loading class from body - app is ready');
     
     // Now that all preconditions are complete, handle URL-based view routing
-    const urlParams2 = new URLSearchParams(window.location.search);
-    const requestedView = urlParams2.get('view');
+    // Check fragment first (for POST-redirect scenarios), then query string
+    let requestedView: string | null = null;
+    
+    const fragment = window.location.hash;
+    if (fragment && fragment.startsWith('#')) {
+      const fragmentParams = new URLSearchParams(fragment.substring(1));
+      requestedView = fragmentParams.get('view');
+      console.log('[VIEW-ROUTING] Fragment has view parameter:', requestedView);
+    }
+    
+    // Fall back to query string if not in fragment
+    if (!requestedView) {
+      const urlParams2 = new URLSearchParams(window.location.search);
+      requestedView = urlParams2.get('view');
+      console.log('[VIEW-ROUTING] Query string has view parameter:', requestedView);
+    }
     
     let defaultView = 'compose'; // Default for tenant admins and editors
     if (isSuperadmin && !roleContext.isInTenantContext) {
@@ -4844,10 +4944,10 @@ function getViewTitle(viewName: string, currentAppId?: string): { appTitle: stri
       viewFunction = 'SMS Configuration';
       break;
     case 'email-logs':
-      viewFunction = 'Email Logs';
+      viewFunction = ''; // h2 in view already shows "📧 Email Logs"
       break;
     case 'sms-logs':
-      viewFunction = 'SMS Logs';
+      viewFunction = ''; // h2 in view already shows "📱 SMS Logs"
       break;
     case 'template-editor':
       viewFunction = 'Template Editor';

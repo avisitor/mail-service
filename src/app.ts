@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import formbody from '@fastify/formbody';
 import { config, flags } from './config.js';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
@@ -47,6 +48,7 @@ export function buildApp() {
 
   app.register(sensible);
   app.register(cors, { origin: true });
+  app.register(formbody); // Support application/x-www-form-urlencoded
   app.register(helmet, { 
     global: true,
     contentSecurityPolicy: {
@@ -231,7 +233,7 @@ export function buildApp() {
     }
     
     // Serve apps.json for frontend configuration
-    const appsPath = join(fileURLToPath(import.meta.url), '../../keys/apps.json');
+    const appsPath = join(dirname(fileURLToPath(import.meta.url)), '../../keys/apps.json');
     if (existsSync(appsPath)) {
       app.get('/keys/apps.json', async (_req, reply) => {
         try {
@@ -530,7 +532,7 @@ export function buildApp() {
     
     return reply.redirect(`/ui?${allParams}`);
   });
-  
+
   // Template Editor route - redirects to IDP for authentication then shows template editor interface (tenant admin only)
   app.get('/template-editor', async (req, reply) => {
     const { appId, returnUrl } = req.query as any;
@@ -682,11 +684,9 @@ export function buildApp() {
       }
       
       // User is authenticated and has admin role, show email logs interface
-      const logsParams = new URLSearchParams({
-        view: 'email-logs',
-        ...(appId && { appId }),
-        ...(returnUrl && { returnUrl })
-      });
+      // Pass through ALL query parameters to preserve token and app-specific information
+      const logsParams = new URLSearchParams(req.query as any);
+      logsParams.set('view', 'email-logs'); // Ensure view is set
       return reply.redirect(`/ui?${logsParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern

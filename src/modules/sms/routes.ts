@@ -14,9 +14,11 @@ import { SmsConfigInput } from './types.js';
 
 export async function registerSmsRoutes(app: FastifyInstance) {
   
-  // SMS compose route - always redirects to frontend UI which handles authentication (same as mail compose)
-  app.get('/sms-compose', async (req, reply) => {
-    const { appId, phoneNumbers, message, returnUrl } = req.query as any;
+  // SMS compose route - supports both GET and POST, always redirects to frontend UI which handles authentication
+  const smsComposeHandler = async (req: any, reply: any) => {
+    // Get parameters from either query (GET) or body (POST)
+    const params = req.method === 'POST' ? req.body : req.query;
+    const { appId, phoneNumbers, message, returnUrl, token } = params;
     
     // Validate appId is provided and exists in database
     if (!appId) {
@@ -38,12 +40,85 @@ export async function registerSmsRoutes(app: FastifyInstance) {
     }
     console.log('[/sms-compose] AppId validated successfully:', validation.app.name);
     
+    // For POST requests, serve HTML page that navigates client-side with fragment
+    if (req.method === 'POST' && phoneNumbers) {
+      console.log('[/sms-compose] POST request with phoneNumbers, using client-side navigation');
+      
+      // Build URL with parameters in fragment to avoid URL length limits
+      const fragmentParams = new URLSearchParams();
+      fragmentParams.set('view', 'sms-compose');
+      fragmentParams.set('appId', appId);
+      if (returnUrl) fragmentParams.set('returnUrl', returnUrl);
+      if (token) fragmentParams.set('token', token);
+      if (message) fragmentParams.set('message', message);
+      
+      // Pass phone numbers in fragment
+      const phoneNumbersStr = typeof phoneNumbers === 'string' ? phoneNumbers : JSON.stringify(phoneNumbers);
+      fragmentParams.set('phoneNumbers', phoneNumbersStr);
+      
+      // Include other params
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && !fragmentParams.has(key)) {
+          fragmentParams.set(key, String(value));
+        }
+      }
+      
+      // Serve HTML page that navigates client-side
+      const fragmentString = fragmentParams.toString();
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Loading SMS Compose...</title>
+  <meta charset="utf-8">
+</head>
+<body>
+  <p>Loading SMS compose...</p>
+  <script>
+    // Navigate to UI with data in fragment (client-side only, never sent to server)
+    window.location.href = '/ui#${fragmentString.replace(/'/g, "\\'")}';
+  </script>
+</body>
+</html>`;
+      
+      return reply.type('text/html').send(html);
+    }
+    
     // Always redirect to frontend UI - let frontend JavaScript handle authentication (same as mail compose)
     // Pass through ALL query parameters to preserve app-specific role information
-    const allParams = new URLSearchParams(req.query as any);
+    const allParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) {
+        allParams.set(key, String(value));
+      }
+    }
     allParams.set('view', 'sms-compose'); // Ensure view is set to sms-compose
     
     return reply.redirect(`/ui?${allParams}`);
+  };
+  
+  app.get('/sms-compose', smsComposeHandler);
+  app.post('/sms-compose', smsComposeHandler);
+  
+  // Endpoint to retrieve SMS compose data from session
+  app.get('/sms-compose-data', async (req: any, reply: any) => {
+    const { sessionKey } = req.query;
+    
+    console.log('[/sms-compose-data] Request for sessionKey:', sessionKey);
+    console.log('[/sms-compose-data] Session exists:', !!req.session);
+    console.log('[/sms-compose-data] Session keys:', req.session ? Object.keys(req.session) : 'no session');
+    
+    if (!sessionKey || !req.session || !req.session[sessionKey]) {
+      console.warn('[/sms-compose-data] Session data not found for key:', sessionKey);
+      return reply.code(404).send({ error: 'Session data not found' });
+    }
+    
+    const data = req.session[sessionKey];
+    console.log('[/sms-compose-data] Returning session data:', data);
+    
+    // Clean up session after retrieving
+    delete req.session[sessionKey];
+    
+    return reply.send(data);
   });
   
   // Send SMS via API
