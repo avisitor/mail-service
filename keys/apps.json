@@ -3,7 +3,7 @@
     "configUrl": "https://retree-hawaii.worldspot.org/planting/auth/mail-config.json"
   },
   "outings-app-id": {
-    "configUrl": "https://outings.worldspot.org/mail-config.json"
+    "configUrl": "https://outings.worldspot.org/config/mail-config.json"
   },
   "cmfm6bqcj0003ylk8qbr4e9hb": {
     "title": "Outings",
