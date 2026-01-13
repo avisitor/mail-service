@@ -6,6 +6,9 @@ export const jwks = jwksClient({
   cache: true,
   cacheMaxEntries: 10,
   cacheMaxAge: 10 * 60 * 1000,
+  requestHeaders: {
+    'User-Agent': 'MailService/1.0.0'
+  }
 });
 
 export async function getSigningKey(kid: string): Promise<string> {
