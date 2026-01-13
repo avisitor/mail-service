@@ -15,6 +15,7 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
 
   app.get('/templates', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const { appId } = req.query as any;
+    app.log.info(`GET /templates requested for appId: ${appId}`);
     if (!appId) {
       return reply.badRequest('appId query parameter is required');
     }
@@ -29,14 +30,17 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
         },
         orderBy: { createdAt: 'desc' }
       });
+      app.log.info(`Found ${allTemplates.length} templates for appId: ${appId}`);
       
       // Filter out templates with null or empty content in JavaScript
       const validTemplates = allTemplates.filter(template => 
         template.content !== null && template.content !== undefined && template.content.trim() !== ''
       );
+      app.log.info(`Returning ${validTemplates.length} valid templates for appId: ${appId}`);
       
       return validTemplates;
     } catch (e: any) {
+      app.log.error(`Error fetching templates: ${e.message}`);
       return reply.badRequest(e.message);
     }
   });

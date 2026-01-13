@@ -648,6 +648,7 @@ class TemplateManager {
   constructor(private selectElementId: string) {}
 
   setAppId(appId: string): void {
+    console.debug(`[TemplateManager] appId set to: ${appId} for element: ${this.selectElementId}`);
     this.appId = appId;
   }
 
@@ -657,23 +658,34 @@ class TemplateManager {
 
   async loadTemplates(): Promise<void> {
     if (!this.appId) {
-      console.warn('[TemplateManager] No appId set');
+      console.warn(`[TemplateManager] No appId set for ${this.selectElementId}`);
       return;
     }
 
     try {
+      console.debug(`[TemplateManager] Loading templates for ${this.appId} using element ${this.selectElementId}...`);
       this.templates = await api(`/templates?appId=${this.appId}`);
+      
+      if (!Array.isArray(this.templates)) {
+        console.error(`[TemplateManager] API did not return an array for ${this.selectElementId}:`, this.templates);
+        this.templates = [];
+      }
+      
       this.populateDropdown();
-      console.debug(`[TemplateManager] Loaded ${this.templates.length} templates`);
+      console.debug(`[TemplateManager] Successfully loaded ${this.templates.length} templates for ${this.selectElementId}`);
     } catch (error) {
-      console.error('[TemplateManager] Failed to load templates:', error);
+      console.error(`[TemplateManager] Failed to load templates for ${this.selectElementId}:`, error);
     }
   }
 
   private populateDropdown(): void {
     const select = document.getElementById(this.selectElementId) as HTMLSelectElement;
-    if (!select) return;
+    if (!select) {
+      console.warn(`[TemplateManager] Could not find select element: ${this.selectElementId}`);
+      return;
+    }
 
+    console.debug(`[TemplateManager] Populating dropdown ${this.selectElementId} with ${this.templates.length} templates`);
     select.innerHTML = '<option value="">Select a template...</option>';
     this.templates.forEach(template => {
       const option = document.createElement('option');
@@ -4568,6 +4580,13 @@ function onAuthenticated(cameFromIdp: boolean = false) {
     } else if (!isSuperadmin && state.user?.tenantId && !tenantId) {
       tenantId = state.user.tenantId;
       localStorage.setItem('tenantId', tenantId);
+    }
+    
+    // Sync appId from user context if available (common for single-app users/editors)
+    if (state.user?.appId && appId !== state.user.appId) {
+      console.log('[ui-auth] Syncing appId from user context:', state.user.appId);
+      appId = state.user.appId;
+      try { localStorage.setItem('appId', appId); } catch {}
     }
     
     // Skip loading apps for editor-only users to avoid 403 errors
