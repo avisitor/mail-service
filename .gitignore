@@ -39,3 +39,5 @@ prisma/.env
 # Optional editor
 .vscode/
 .idea/
+.rolesanywhere/.ssh
+.serena
