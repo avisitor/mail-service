@@ -1,12 +1,116 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { config } from '../config.js';
 import { resolveSmtpConfig } from '../modules/smtp/service.js';
+
+const execFileAsync = promisify(execFile);
 
 let transporter: Transporter | null = null;
 let cachedConfig: any = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const PROJECT_DIR = process.env.MAIL_SERVICE_DIR || process.cwd();
+const ROLES_ANYWHERE_DIR = path.join(PROJECT_DIR, '.rolesanywhere');
+const ROLES_ANYWHERE_BIN_DIR = path.join(ROLES_ANYWHERE_DIR, 'bin');
+const ROLES_ANYWHERE_SSH_DIR = path.join(ROLES_ANYWHERE_DIR, '.ssh');
+
+const ROLES_ANYWHERE_SOURCE_DIR = process.env.ROLES_ANYWHERE_SOURCE_DIR || '/var/www/html/outings';
+const ROLES_ANYWHERE_SOURCE_BIN = path.join(ROLES_ANYWHERE_SOURCE_DIR, 'bin');
+const ROLES_ANYWHERE_SOURCE_SSH = path.join(ROLES_ANYWHERE_SOURCE_DIR, '.ssh');
+
+const ROLES_ANYWHERE_CERT = process.env.ROLES_ANYWHERE_CERT || path.join(ROLES_ANYWHERE_SSH_DIR, 'server.crt');
+const ROLES_ANYWHERE_KEY = process.env.ROLES_ANYWHERE_KEY || path.join(ROLES_ANYWHERE_SSH_DIR, 'server.key');
+const ROLES_ANYWHERE_HELPER = process.env.ROLES_ANYWHERE_HELPER || path.join(ROLES_ANYWHERE_BIN_DIR, 'aws_signing_helper');
+const ROLES_ANYWHERE_TRUST_ANCHOR_ARN = process.env.ROLES_ANYWHERE_TRUST_ANCHOR_ARN || 'arn:aws:rolesanywhere:us-west-2:555195510146:trust-anchor/bd9865e9-2783-4012-9e50-1b2965b63559';
+const ROLES_ANYWHERE_PROFILE_ARN = process.env.ROLES_ANYWHERE_PROFILE_ARN || 'arn:aws:rolesanywhere:us-west-2:555195510146:profile/78ae31ca-ffe9-4d32-b116-08b08eadf307';
+const ROLES_ANYWHERE_ROLE_ARN = process.env.ROLES_ANYWHERE_ROLE_ARN || 'arn:aws:iam::555195510146:role/Rob-SES';
+
+type RolesAnywhereCredentials = {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+  expiration: string;
+};
+
+let cachedRolesAnywhereCreds: RolesAnywhereCredentials | null = null;
+let cachedRolesAnywhereExpiry = 0;
+const ROLES_ANYWHERE_REFRESH_SKEW_MS = 2 * 60 * 1000; // refresh 2 minutes before expiration
+
+async function ensureRolesAnywhereFiles(): Promise<void> {
+  await fs.mkdir(ROLES_ANYWHERE_BIN_DIR, { recursive: true });
+  await fs.mkdir(ROLES_ANYWHERE_SSH_DIR, { recursive: true });
+
+  const helperTarget = ROLES_ANYWHERE_HELPER;
+  const certTarget = ROLES_ANYWHERE_CERT;
+  const keyTarget = ROLES_ANYWHERE_KEY;
+
+  const helperSource = path.join(ROLES_ANYWHERE_SOURCE_BIN, 'aws_signing_helper');
+  const certSource = path.join(ROLES_ANYWHERE_SOURCE_SSH, 'server.crt');
+  const keySource = path.join(ROLES_ANYWHERE_SOURCE_SSH, 'server.key');
+
+  try {
+    await fs.access(helperTarget);
+  } catch {
+    await fs.copyFile(helperSource, helperTarget);
+    await fs.chmod(helperTarget, 0o755);
+  }
+
+  try {
+    await fs.access(certTarget);
+  } catch {
+    await fs.copyFile(certSource, certTarget);
+  }
+
+  try {
+    await fs.access(keyTarget);
+  } catch {
+    await fs.copyFile(keySource, keyTarget);
+  }
+}
+
+async function getRolesAnywhereCredentials(): Promise<RolesAnywhereCredentials> {
+  const now = Date.now();
+  if (cachedRolesAnywhereCreds && cachedRolesAnywhereExpiry - ROLES_ANYWHERE_REFRESH_SKEW_MS > now) {
+    return cachedRolesAnywhereCreds;
+  }
+
+  await ensureRolesAnywhereFiles();
+  await Promise.all([
+    fs.access(ROLES_ANYWHERE_CERT),
+    fs.access(ROLES_ANYWHERE_KEY),
+    fs.access(ROLES_ANYWHERE_HELPER),
+  ]);
+
+  const { stdout } = await execFileAsync(ROLES_ANYWHERE_HELPER, [
+    'credential-process',
+    '--certificate', ROLES_ANYWHERE_CERT,
+    '--private-key', ROLES_ANYWHERE_KEY,
+    '--trust-anchor-arn', ROLES_ANYWHERE_TRUST_ANCHOR_ARN,
+    '--profile-arn', ROLES_ANYWHERE_PROFILE_ARN,
+    '--role-arn', ROLES_ANYWHERE_ROLE_ARN,
+  ]);
+
+  const parsed = JSON.parse(stdout.toString());
+  const creds: RolesAnywhereCredentials = {
+    accessKeyId: parsed.AccessKeyId,
+    secretAccessKey: parsed.SecretAccessKey,
+    sessionToken: parsed.SessionToken,
+    expiration: parsed.Expiration,
+  };
+
+  if (!creds.accessKeyId || !creds.secretAccessKey || !creds.sessionToken || !creds.expiration) {
+    throw new Error('RolesAnywhere credential-process returned incomplete credentials');
+  }
+
+  cachedRolesAnywhereCreds = creds;
+  cachedRolesAnywhereExpiry = Date.parse(creds.expiration) || 0;
+  return creds;
+}
 
 export function getTransporter(tenantId?: string, appId?: string): Transporter {
   // Use cached transporter if configuration hasn't changed
@@ -52,9 +156,13 @@ async function getTransporterAsync(tenantId?: string, appId?: string): Promise<T
     // This is a simplified approach - in production you might want a more robust implementation
     const sesClient = new SESClient({
       region: smtpConfig.awsRegion || 'us-east-1',
-      credentials: {
-        accessKeyId: smtpConfig.awsAccessKey!,
-        secretAccessKey: smtpConfig.awsSecretKey!,
+      credentials: async () => {
+        const creds = await getRolesAnywhereCredentials();
+        return {
+          accessKeyId: creds.accessKeyId,
+          secretAccessKey: creds.secretAccessKey,
+          sessionToken: creds.sessionToken,
+        };
       },
     });
     
