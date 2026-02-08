@@ -139,6 +139,10 @@ describe('Batched Mail Processing', () => {
     const { workerTick } = await import('../src/modules/worker/service.js');
     const result = await workerTick();
 
+    const logs = await prisma.maillog.findMany({
+      where: { groupId: data.groupId }
+    });
+
     const endTime = Date.now();
     const processingTime = endTime - startTime;
 
@@ -158,6 +162,11 @@ describe('Batched Mail Processing', () => {
     // Verify results
     expect(result.jobsProcessed).toBeGreaterThan(0);
     expect(result.jobsSent).toBeGreaterThan(0);
+
+    expect(logs.length).toBeGreaterThan(0);
+    const uniqueGroupIds = new Set(logs.map(log => log.groupId));
+    expect(uniqueGroupIds.size).toBe(1);
+    expect(uniqueGroupIds.has(data.groupId)).toBe(true);
     
     expect(result.jobsFailed).toBe(0);
     
