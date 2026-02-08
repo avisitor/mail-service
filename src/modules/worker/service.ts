@@ -264,6 +264,7 @@ async function processJob(job: any): Promise<void> {
       await prisma.maillog.create({
         data: {
           messageId: messageId,
+          groupId: job.groupId,
           appId: job.appId,
           subject: subject,
           senderName: job.senderName,
@@ -282,6 +283,7 @@ async function processJob(job: any): Promise<void> {
         await prisma.maillog.create({
           data: {
             messageId: messageId,
+            groupId: job.groupId,
             appId: job.appId,
             subject: subject,
             senderName: job.senderName,
