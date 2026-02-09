@@ -225,7 +225,7 @@ async function getTransporterAsync(tenantId?: string, appId?: string): Promise<T
 }
 
 export interface SendEmailInput {
-  to: string;
+  to: string | string[];
   subject: string;
   html?: string;
   text?: string;
@@ -246,25 +246,42 @@ export async function sendEmail(input: SendEmailInput) {
     throw new Error('Simulated permanent failure');
   }
   if ((process.env.SMTP_DRY_RUN || 'false').toLowerCase() === 'true') {
+    const dryRunRecipients = Array.isArray(input.to) ? input.to : [input.to];
     return {
       messageId: 'dry-run-' + Date.now(),
-      accepted: [input.to],
+      accepted: dryRunRecipients,
       rejected: [],
       response: 'Dry run mode - email not actually sent',
       status: 'queued'
     };
   }
 
+  const recipients = Array.isArray(input.to) ? input.to : [input.to];
+  const normalizedRecipients = recipients
+    .map(recipient => recipient.trim())
+    .filter(recipient => recipient.length > 0);
+  if (normalizedRecipients.length === 0) {
+    throw new Error('No recipients provided');
+  }
+
+  const hasSimulatorRecipient = normalizedRecipients.some(recipient => {
+    const domain = recipient.split('@')[1]?.toLowerCase();
+    return domain === 'simulator.amazonses.com';
+  });
+  const hasTestRecipient = normalizedRecipients.some(recipient => {
+    const lower = recipient.toLowerCase();
+    const domain = lower.split('@')[1]?.toLowerCase();
+    return domain === 'test.com' || domain?.endsWith('.test') || ['a@test.com', 'b@test.com'].includes(lower);
+  });
+
   // Email routing validation
-  const emailDomain = input.to.split('@')[1]?.toLowerCase();
-  const isSimulatorEmail = emailDomain === 'simulator.amazonses.com';
-  const isTestEmail = emailDomain === 'test.com' || 
-                     emailDomain?.endsWith('.test') || 
-                     ['a@test.com', 'b@test.com'].includes(input.to.toLowerCase());
+  const isSimulatorEmail = hasSimulatorRecipient;
+  const isTestEmail = hasTestRecipient;
 
   let transporter: nodemailer.Transporter;
   let fromAddr: string;
   let fromName: string | undefined;
+  let serviceType: 'smtp' | 'ses' = 'smtp';
 
   if (input.testEmail) {
     // Force MailHog configuration when testEmail flag is true
@@ -281,10 +298,12 @@ export async function sendEmail(input: SendEmailInput) {
     
     fromAddr = config.testSmtp.enabled ? config.testSmtp.fromDefault : 'test@example.com';
     fromName = config.testSmtp.enabled ? config.testSmtp.fromName : 'Mail Service Test';
+    serviceType = 'smtp';
   } else {
     // Use resolved application/tenant SMTP configuration
     transporter = await getTransporterAsync(input.tenantId, input.appId);
     const smtpConfig = await resolveSmtpConfig(input.appId);
+    serviceType = smtpConfig.service === 'ses' ? 'ses' : 'smtp';
 
     // Routing validation: ensure proper service is used for email types
     if (isSimulatorEmail && smtpConfig.service !== 'ses') {
@@ -305,21 +324,39 @@ export async function sendEmail(input: SendEmailInput) {
 
   const from = fromName && fromAddr ? `${fromName} <${fromAddr}>` : fromAddr;
   
-  const result = await transporter.sendMail({
-    from,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-    text: input.text,
-  });
+  const batchLimit = serviceType === 'ses' ? 40 : 100;
+  const batchResults = [] as Array<{ messageId?: string; accepted: string[]; rejected: string[]; response?: string }>;
+
+  for (let i = 0; i < normalizedRecipients.length; i += batchLimit) {
+    const batchRecipients = normalizedRecipients.slice(i, i + batchLimit);
+    const result = await transporter.sendMail({
+      from,
+      to: batchRecipients,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    });
+
+    batchResults.push({
+      messageId: result.messageId,
+      accepted: (result.accepted || []) as string[],
+      rejected: (result.rejected || []) as string[],
+      response: result.response
+    });
+  }
+
+  const accepted = batchResults.flatMap(result => result.accepted);
+  const rejected = batchResults.flatMap(result => result.rejected);
+  const messageId = batchResults[0]?.messageId;
+  const response = batchResults.map(result => result.response).filter(Boolean).join(' | ') || 'Email sent successfully';
 
   // Return detailed delivery information
   return {
-    messageId: result.messageId,
-    accepted: result.accepted || [],
-    rejected: result.rejected || [],
-    response: result.response || 'Email sent successfully',
-    status: (result.rejected && result.rejected.length > 0) ? 'partial_failure' : 'sent'
+    messageId,
+    accepted,
+    rejected,
+    response,
+    status: rejected.length > 0 ? 'partial_failure' : 'sent'
   };
 }
 

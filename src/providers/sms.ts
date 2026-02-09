@@ -220,6 +220,21 @@ export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
   
   const client = await getTwilioClient(tenantId, appId);
   if (!client) {
+    const senderName = 'System';
+    for (const phoneNumber of to) {
+      const cleanNumber = phoneNumber.trim();
+      if (!cleanNumber) {
+        continue;
+      }
+      await logSmsToDatabase({
+        appId,
+        recipients: cleanNumber,
+        message,
+        senderName,
+        failed: true,
+        errorMessage: 'No SMS configuration available'
+      });
+    }
     return to.map(() => ({
       success: false,
       error: 'No SMS configuration available'
