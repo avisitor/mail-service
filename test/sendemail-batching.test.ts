@@ -1,11 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const sendMailMock = vi.fn(async (options: any) => ({
-  messageId: `msg-${sendMailMock.mock.calls.length}`,
-  accepted: Array.isArray(options.to) ? options.to : [options.to],
-  rejected: [],
-  response: 'ok'
-}));
+type SendMailResult = {
+  messageId: string;
+  accepted: string[];
+  rejected: string[];
+  response: string;
+};
+
+let sendMailCallCount = 0;
+const sendMailMock = vi.fn(async (options: any): Promise<SendMailResult> => {
+  sendMailCallCount += 1;
+  return {
+    messageId: `msg-${sendMailCallCount}`,
+    accepted: Array.isArray(options.to) ? options.to : [options.to],
+    rejected: [],
+    response: 'ok'
+  };
+});
 
 vi.mock('nodemailer', () => ({
   default: {
@@ -28,6 +39,7 @@ vi.mock('../src/modules/smtp/service.js', () => ({
 describe('sendEmail batching', () => {
   beforeEach(() => {
     sendMailMock.mockClear();
+    sendMailCallCount = 0;
   });
 
   it('splits recipients into SMTP batches of 100', async () => {

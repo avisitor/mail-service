@@ -123,7 +123,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
   
   // Send SMS via API
   app.post('/api/sms/send', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
-    const { appId, phoneNumbers, message } = req.body as any;
+    const { appId, phoneNumbers, message, testMode, testCredentials } = req.body as any;
     
     if (!appId) {
       return reply.code(400).send({ error: 'appId is required' });
@@ -153,16 +153,47 @@ export async function registerSmsRoutes(app: FastifyInstance) {
     try {
       // Extract tenant ID for context
       const tenantId = validation.app.tenantId;
+
+      let testConfigOverride: any = null;
+      if (testMode && testCredentials) {
+        const userContext = (req as any).userContext;
+        const roles = userContext?.roles || [];
+        const canUseTestCreds =
+          roles.includes('tenant_admin') ||
+          roles.includes('superadmin') ||
+          (roles.includes('app') && userContext?.appId === appId);
+        if (!canUseTestCreds) {
+          return reply.code(403).send({ error: 'Forbidden', message: 'Test credentials require tenant admin or app scope.' });
+        }
+
+        const sid = (testCredentials.sid || '').trim();
+        const token = (testCredentials.token || '').trim();
+        const from = (testCredentials.from || '').trim();
+        if (!sid || !token || !from) {
+          return reply.code(400).send({ error: 'Bad Request', message: 'testCredentials must include sid, token, and from.' });
+        }
+
+        testConfigOverride = {
+          accountSid: sid,
+          authToken: token,
+          fromNumber: from,
+          fallbackTo: (testCredentials.fallbackTo || '').trim() || undefined,
+          serviceSid: (testCredentials.serviceSid || '').trim() || undefined,
+        };
+      }
       
       const results = await sendSms({
         to: phoneNumbers,
         message: message.trim(),
         tenantId,
-        appId
+        appId,
+        testMode: Boolean(testMode),
+        testConfigOverride
       });
       
       const successCount = results.filter(r => r.success).length;
       const failureCount = results.length - successCount;
+      const success = failureCount === 0;
       
       console.log('[SMS API] Send results:', { 
         total: results.length, 
@@ -174,7 +205,7 @@ export async function registerSmsRoutes(app: FastifyInstance) {
       
       // Return detailed results
       return reply.send({
-        success: true,
+        success,
         summary: {
           total: results.length,
           successful: successCount,

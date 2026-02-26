@@ -42,3 +42,4 @@ prisma/.env
 .idea/
 .rolesanywhere/.ssh
 .serena
+fix-rolesanywhere-permissions.sh

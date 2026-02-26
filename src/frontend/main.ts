@@ -2361,10 +2361,17 @@ class SmsComposeView implements IView {
         })
       });
 
-      // Clear form after successful send
-      this.clearForm();
+      const failedCount = response?.summary?.failed ?? 0;
+      const isSuccess = response?.success === true && failedCount === 0;
+
+      if (isSuccess) {
+        // Clear form after successful send
+        this.clearForm();
+      } else {
+        this.showStatus('SMS send failed. Please review the summary for details.');
+      }
       
-      // Show success dialog with results
+      // Show summary dialog with results
       showSmsSendSummaryDialog(response, phoneNumbers.length);
       
     } catch (error) {
@@ -9911,15 +9918,22 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
 
 // Show SMS send summary dialog
 function showSmsSendSummaryDialog(result: any, recipientCount: number) {
-    let message = `📱 SMS sent successfully!\n\n` +
-                  `Recipients: ${recipientCount}\n`;
+  const failed = result?.summary?.failed ?? result?.failed ?? 0;
+  const successful = result?.summary?.successful ?? result?.successful ?? 0;
+  const isSuccess = failed === 0 && (result?.success !== false);
+
+  let message = isSuccess
+    ? `📱 SMS sent successfully!\n\n`
+    : `⚠️ SMS send failed or partially completed.\n\n`;
+
+  message += `Recipients: ${recipientCount}\n`;
     
     // Add success/failure details if available
-    if (result.successful !== undefined && result.failed !== undefined) {
-        message += `✅ Successful sends: ${result.successful}\n`;
-        if (result.failed > 0) {
-            message += `❌ Failed sends: ${result.failed}\n`;
-        }
+    if (successful !== undefined || failed !== undefined) {
+      message += `✅ Successful sends: ${successful}\n`;
+      if (failed > 0) {
+        message += `❌ Failed sends: ${failed}\n`;
+      }
     }
     
     // Add message ID if available
@@ -9929,9 +9943,11 @@ function showSmsSendSummaryDialog(result: any, recipientCount: number) {
     
     // Add any additional details
     if (result.details) {
-        message += `\nDetails: ${result.details}`;
+      message += `\nDetails: ${result.details}`;
     } else {
-        message += `\nYour SMS message has been sent to the recipients.`;
+      message += isSuccess
+        ? `\nYour SMS message has been sent to the recipients.`
+        : `\nYour SMS message could not be delivered to all recipients.`;
     }
     
     alert(message);

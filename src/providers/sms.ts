@@ -17,6 +17,8 @@ interface SendSmsInput {
   message: string;
   tenantId?: string;
   appId?: string;
+  testMode?: boolean;
+  testConfigOverride?: SmsConfig | null;
 }
 
 interface SmsResult {
@@ -67,6 +69,23 @@ async function logSmsToDatabase(params: {
 }
 
 // Function to get SMS configuration from database
+function getTestSmsConfig(): SmsConfig | null {
+  const sid = process.env.SMS_TEST_SID?.trim() || '';
+  const token = process.env.SMS_TEST_TOKEN?.trim() || '';
+  const from = process.env.SMS_TEST_FROM?.trim() || '';
+  if (!sid || !token || !from) {
+    return null;
+  }
+
+  return {
+    accountSid: sid,
+    authToken: token,
+    fromNumber: from,
+    fallbackTo: process.env.SMS_TEST_FALLBACK_TO?.trim() || undefined,
+    serviceSid: process.env.SMS_TEST_SERVICE?.trim() || undefined,
+  };
+}
+
 async function getSmsConfig(tenantId?: string, appId?: string): Promise<SmsConfig | null> {
   try {
     const config = await resolveSmsConfig(appId);
@@ -186,13 +205,42 @@ class TwilioClient {
 // Cache for Twilio client
 let twilioClient: TwilioClient | null = null;
 let cachedConfig: SmsConfig | null = null;
+let testTwilioClient: TwilioClient | null = null;
+let cachedTestConfig: SmsConfig | null = null;
 
-async function getTwilioClient(tenantId?: string, appId?: string): Promise<TwilioClient | null> {
-  const config = await getSmsConfig(tenantId, appId);
+async function getTwilioClient(
+  tenantId?: string,
+  appId?: string,
+  testMode?: boolean,
+  testConfigOverride?: SmsConfig | null
+): Promise<TwilioClient | null> {
+  if (testMode && testConfigOverride) {
+    console.log('[SMS] Using request-provided TEST credentials');
+    return new TwilioClient(testConfigOverride);
+  }
+  const testConfig = testMode ? getTestSmsConfig() : null;
+  const config = testConfig ?? await getSmsConfig(tenantId, appId);
   
   if (!config) {
     console.error('[SMS] No SMS configuration available');
     return null;
+  }
+
+  if (testConfig) {
+    if (!testTwilioClient || !cachedTestConfig ||
+        cachedTestConfig.accountSid !== config.accountSid ||
+        cachedTestConfig.authToken !== config.authToken ||
+        cachedTestConfig.fromNumber !== config.fromNumber ||
+        cachedTestConfig.serviceSid !== config.serviceSid) {
+      testTwilioClient = new TwilioClient(config);
+      cachedTestConfig = config;
+      console.log('[SMS] Initialized Twilio client with TEST config:', {
+        accountSid: config.accountSid,
+        fromNumber: config.fromNumber,
+        serviceSid: config.serviceSid
+      });
+    }
+    return testTwilioClient;
   }
   
   // Check if we need to create a new client
@@ -213,12 +261,12 @@ async function getTwilioClient(tenantId?: string, appId?: string): Promise<Twili
 }
 
 export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
-  const { to, message, tenantId, appId } = input;
+  const { to, message, tenantId, appId, testMode, testConfigOverride } = input;
   
   console.log('[SMS] Sending SMS to', to.length, 'recipients');
   console.log('[SMS] Context:', { tenantId, appId });
   
-  const client = await getTwilioClient(tenantId, appId);
+  const client = await getTwilioClient(tenantId, appId, testMode, testConfigOverride);
   if (!client) {
     const senderName = 'System';
     for (const phoneNumber of to) {
@@ -242,7 +290,7 @@ export async function sendSms(input: SendSmsInput): Promise<SmsResult[]> {
   }
   
   // Get config details for logging
-  const config = await getSmsConfig(tenantId, appId);
+  const config = testConfigOverride ?? (testMode ? getTestSmsConfig() : null) ?? await getSmsConfig(tenantId, appId);
   const senderPhone = config?.fromNumber;
   const senderName = 'System'; // You could make this configurable
   
