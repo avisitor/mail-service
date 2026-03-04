@@ -3,7 +3,10 @@
     "configUrl": "https://retree-hawaii.worldspot.org/planting/auth/mail-config.json"
   },
   "outings-app-id": {
-    "configUrl": "https://outings.worldspot.org/config/mail-config.json"
+    "configUrl": "https://outings.worldspot.org/s/config/mail-config.json"
+  },
+  "maunaala-app-id": {
+    "configUrl": "https://outings.worldspot.org/maunaala/config/mail-config.json"
   },
   "cmfm6bqcj0003ylk8qbr4e9hb": {
     "title": "Outings",
@@ -20,23 +23,23 @@
       "items": [
         {
           "text": "Home",
-          "url": "https://outings.worldspot.org/"
+          "url": "https://outings.worldspot.org/s"
         },
         {
           "text": "Calendar",
-          "url": "https://outings.worldspot.org/calendar.php"
+          "url": "https://outings.worldspot.org/s/calendar.php"
         },
         {
           "text": "Trip Reports",
-          "url": "https://outings.worldspot.org/reports.php"
+          "url": "https://outings.worldspot.org/s/reports.php"
         },
         {
           "text": "Member Area",
-          "url": "https://outings.worldspot.org/members/"
+          "url": "https://outings.worldspot.org/s/members/"
         },
         {
           "text": "Contact",
-          "url": "https://outings.worldspot.org/contact.php"
+          "url": "https://outings.worldspot.org/s/contact.php"
         }
       ]
     }
