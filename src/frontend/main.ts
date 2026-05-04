@@ -277,25 +277,23 @@ async function loadRemoteAppConfig(configUrl: string): Promise<Partial<AppConfig
 }
 
 async function resolveAppConfig(appId: string): Promise<AppConfig | null> {
-  const appsConfig = await loadAppsConfig();
-  const baseConfig = appsConfig[appId];
-  if (!baseConfig) {
-    console.warn(`[CustomCSS] No config entry found for appId ${appId}`);
+  try {
+    const resp = await fetch(`/api/app-config/${encodeURIComponent(appId)}`, {
+      method: 'GET',
+      credentials: 'omit',
+      headers: { Accept: 'application/json' }
+    });
+    if (!resp.ok) {
+      console.warn(`[CustomCSS] /api/app-config returned ${resp.status} for ${appId}`);
+      return null;
+    }
+    const config = await resp.json();
+    console.log(`[CustomCSS] Resolved config from /api/app-config for ${appId}:`, config);
+    return config;
+  } catch (error) {
+    console.warn('[CustomCSS] Error fetching /api/app-config:', appId, error);
     return null;
   }
-
-  if (baseConfig.configUrl) {
-    const remoteConfig = await loadRemoteAppConfig(baseConfig.configUrl);
-    if (remoteConfig) {
-      return {
-        ...baseConfig,
-        ...remoteConfig,
-        configUrl: baseConfig.configUrl
-      };
-    }
-  }
-
-  return baseConfig;
 }
 
 async function loadCustomCSS(appId: string): Promise<void> {

@@ -246,6 +246,44 @@ export function buildApp() {
         }
       });
       app.log.info('apps.json route mounted');
+
+      // Resolve full app config (apps.json entry merged with remote configUrl
+      // contents) server-side. Avoids cross-origin fetch from the browser.
+      app.get('/api/app-config/:appId', async (req, reply) => {
+        try {
+          const { appId } = req.params as { appId: string };
+          const raw = await import('fs/promises').then(m => m.readFile(appsPath, 'utf8'));
+          const apps = JSON.parse(raw);
+          const baseConfig = apps[appId];
+          if (!baseConfig) {
+            return reply.code(404).send({ error: 'NotFound', message: `No config for appId ${appId}` });
+          }
+
+          let merged: any = { ...baseConfig };
+          if (baseConfig.configUrl) {
+            try {
+              const resp = await fetch(baseConfig.configUrl, {
+                method: 'GET',
+                headers: { Accept: 'application/json' }
+              });
+              if (resp.ok) {
+                const remote = await resp.json();
+                merged = { ...baseConfig, ...remote, configUrl: baseConfig.configUrl };
+              } else {
+                app.log.warn({ appId, configUrl: baseConfig.configUrl, status: resp.status },
+                  'remote app config fetch failed');
+              }
+            } catch (err: any) {
+              app.log.warn({ appId, configUrl: baseConfig.configUrl, err: err.message },
+                'remote app config fetch error');
+            }
+          }
+          reply.header('content-type', 'application/json').send(merged);
+        } catch (e: any) {
+          reply.code(500).send({ error: e.message });
+        }
+      });
+      app.log.info('app-config route mounted');
     }
   } catch (e) {
     app.log.warn({ err: e }, 'jwks.json mount failed');
