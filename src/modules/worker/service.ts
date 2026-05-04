@@ -72,54 +72,6 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
     // Process jobs in batches with configurable delays
     for (let i = 0; i < jobs.length; i += batchConfig.batchSize) {
       const batch = jobs.slice(i, i + batchConfig.batchSize);
-      // Only process jobs if we haven't hit the rate limit
-      if (result.jobsProcessed >= maxJobsToProcess) {
-        // Mark remaining jobs as rate limited
-        result.jobsRateLimited += batch.length;
-        continue;
-      }
-
-      // Check rate limits before each batch
-      const hourlyAllowed = globalRateTracker.checkHourlyLimit(batchConfig.maxEmailsPerHour);
-      const dailyAllowed = globalRateTracker.checkDailyLimit(batchConfig.maxEmailsPerDay);
-      if (!hourlyAllowed || !dailyAllowed) {
-        result.jobsRateLimited += batch.length;
-        continue;
-      }
-
-      // Only process up to the allowed jobs in this batch
-      const jobsToProcess = batch.slice(0, maxJobsToProcess - result.jobsProcessed);
-      const batchPromises = jobsToProcess.map(job => processJob(job));
-      const batchResults = await Promise.allSettled(batchPromises);
-
-      batchResults.forEach((promiseResult, index) => {
-        const job = jobsToProcess[index];
-        result.jobsProcessed++;
-        if (promiseResult.status === 'fulfilled') {
-          result.jobsSent++;
-          globalRateTracker.incrementCounters();
-        } else {
-          result.jobsFailed++;
-          result.errors.push(`Job ${job.jobId}: ${promiseResult.reason?.message || 'Unknown error'}`);
-        }
-      });
-
-      // Mark any jobs in the batch that weren't processed as rate limited
-      if (batch.length > jobsToProcess.length) {
-        result.jobsRateLimited += batch.length - jobsToProcess.length;
-      }
-
-      // Inter-batch delay (for anti-spam batching)
-      if (batchConfig.interBatchDelayMs > 0 && i + batchConfig.batchSize < jobs.length) {
-        await sleep(batchConfig.interBatchDelayMs);
-      }
-    }
-
-    return result;
-
-    // Process jobs in batches with configurable delays
-    for (let i = 0; i < jobs.length; i += batchConfig.batchSize) {
-      const batch = jobs.slice(i, i + batchConfig.batchSize);
       
       // Check rate limits before each batch
       const hourlyAllowed = globalRateTracker.checkHourlyLimit(batchConfig.maxEmailsPerHour);
@@ -231,7 +183,9 @@ async function processJob(job: any): Promise<void> {
       subject: subject,
       html: html,
       appId: job.appId,
-      testEmail: isTestEmail // Use detected test mode
+      testEmail: isTestEmail,
+      fromName: job.senderName || undefined,
+      fromAddress: job.senderEmail || undefined
     });
 
     debugLog(`[Worker] Email delivery result for job ${job.jobId}:`, {

@@ -28,6 +28,18 @@ function debugLog(category: string, message: string, data?: any): void {
   }
 }
 
+function isAppIntegratedModeFromParams(params: URLSearchParams): boolean {
+  const returnUrl = params.get('returnUrl') || localStorage.getItem('editorReturnUrl');
+  if (returnUrl) {
+    return true;
+  }
+
+  const appIdHint = params.get('appId') || params.get('app');
+  const view = params.get('view') || '';
+  const appIntegratedViews = new Set(['compose', 'sms-compose', 'template-editor', 'email-logs', 'sms-logs', 'mailinglists']);
+  return !!(appIdHint && appIntegratedViews.has(view));
+}
+
 // Deterministic precondition system - NO polling or timeouts
 class PreconditionManager {
   private static instance: PreconditionManager | null = null;
@@ -393,10 +405,12 @@ async function loadEmbeddedMenu(menuConfig: any, appParams: Record<string, strin
     console.log('[EmbeddedMenu] Loading menu from:', url.toString());
     console.log('[EmbeddedMenu] App parameters:', appParams);
     
-    // First try without credentials to avoid CORS issues with wildcard origin
+    // Include credentials so the app's session cookie is sent and the menu
+    // renders with the user's actual roles (admin/leader items). Requires the
+    // app server to reflect the exact Origin and send Allow-Credentials: true.
     let response = await fetch(url.toString(), {
       method: 'GET',
-      credentials: 'omit', // Don't include cookies to avoid CORS conflict
+      credentials: 'include',
       headers: {
         'Accept': 'text/html'
       }
@@ -770,6 +784,9 @@ class ComposeView implements IView {
   private recipientsData: any[] = [];
   private recipientEmails: string = '';
   private subjectFromUrl: string = '';
+  private fromAddressFromUrl: string = '';
+  private fromNameFromUrl: string = '';
+  private testEmailFromUrl: string = '';
   private participantContextData: any[] = [];
   private isRestoringState = false;
 
@@ -805,10 +822,14 @@ class ComposeView implements IView {
     const returnUrlFromUrl = getParam('returnUrl');
     const subjectFromUrl = getParam('subject');
     const participantDataFromUrl = getParam('participantData');
+    const fromAddressFromUrl = getParam('fromAddress');
+    const fromNameFromUrl = getParam('fromName');
+    const testEmailFromUrl = getParam('testEmail');
     
     // Set currentAppId for this view
     if (appIdFromUrl) {
       this.currentAppId = appIdFromUrl;
+      composeState.currentAppId = appIdFromUrl;
     }
     
     // Update title with current app info
@@ -849,6 +870,24 @@ class ComposeView implements IView {
       console.log('[ComposeView] Subject from URL:', this.subjectFromUrl);
     }
 
+    if (testEmailFromUrl) {
+      this.testEmailFromUrl = decodeURIComponent(testEmailFromUrl);
+      console.log('[ComposeView] Test email from URL:', this.testEmailFromUrl);
+    }
+
+    // Handle from address/name if provided
+    if (fromAddressFromUrl) {
+      this.fromAddressFromUrl = decodeURIComponent(fromAddressFromUrl);
+      console.log('[ComposeView] From address from URL:', this.fromAddressFromUrl);
+      composeState.currentAppId = composeState.currentAppId || appIdFromUrl || null;
+    }
+
+    if (fromNameFromUrl) {
+      this.fromNameFromUrl = decodeURIComponent(fromNameFromUrl);
+      composeState.fromName = this.fromNameFromUrl;
+      console.log('[ComposeView] From name from URL:', this.fromNameFromUrl);
+    }
+
     // Handle participant context data if provided
     if (participantDataFromUrl) {
       try {
@@ -861,6 +900,7 @@ class ComposeView implements IView {
 
     if (appIdFromUrl) {
       this.currentAppId = appIdFromUrl;
+      composeState.currentAppId = appIdFromUrl;
       this.templateManager.setAppId(appIdFromUrl);
       
       // Update title now that we have the appId
@@ -902,11 +942,33 @@ class ComposeView implements IView {
       if (this.subjectFromUrl) {
         this.populateSubjectFromUrl();
       }
+
+      if (this.testEmailFromUrl) {
+        const testRecipientInput = document.querySelector('#testRecipient') as HTMLInputElement;
+        if (testRecipientInput) {
+          testRecipientInput.value = this.testEmailFromUrl;
+        }
+      }
+
+      // Populate from address if provided in URL
+      if (this.fromAddressFromUrl) {
+        const fromInput = document.querySelector('#fromAddress') as HTMLInputElement;
+        if (fromInput) {
+          if (this.fromNameFromUrl) {
+            fromInput.value = `${this.fromNameFromUrl} <${this.fromAddressFromUrl}>`;
+          } else {
+            fromInput.value = this.fromAddressFromUrl;
+          }
+        }
+      }
       
       // Populate global compose state with participant context data
       if (this.participantContextData.length > 0) {
         composeState.recipientsData = this.participantContextData;
         console.log('[ComposeView] Populated composeState.recipientsData with participant context:', this.participantContextData.length, 'recipients');
+        // Prefer participant data for display so names render in the recipients field
+        this.recipientsData = this.participantContextData;
+        this.populateRecipientsFromData();
       }
     } else {
       // Check for appId from authentication context (state.user.appId)
@@ -933,8 +995,9 @@ class ComposeView implements IView {
       // Prefer user's authenticated appId over saved state
       const appIdToUse = userAppId || savedAppId;
       
-      if (appIdToUse) {
+        if (appIdToUse) {
         this.currentAppId = appIdToUse;
+          composeState.currentAppId = appIdToUse;
         this.templateManager.setAppId(appIdToUse);
         
         // Load custom CSS for this app if not already loaded
@@ -1215,6 +1278,9 @@ class ComposeView implements IView {
       // Load previous messages
       this.previousMessages = await api(`/api/previous-messages?appId=${this.currentAppId}`);
       this.populatePreviousMessagesDropdown();
+
+      // Load mailing lists for the picker
+      await this.loadMailingListsDropdown();
       
       // Load SMTP from address with reliable tenant ID resolution
       const tenantId = extractTenantFromAppId(this.currentAppId);
@@ -1225,18 +1291,22 @@ class ComposeView implements IView {
         const smtpConfig = await api(`/smtp-configs/effective?scope=APP&tenantId=${tenantId}&appId=${this.currentAppId}`);
         
         if (fromAddressInput) {
-          if (smtpConfig?.fromAddress) {
+          const hasExplicitFrom = !!fromAddressInput.value.trim();
+          if (!hasExplicitFrom && smtpConfig?.fromAddress) {
             fromAddressInput.value = smtpConfig.fromAddress;
-          } else {
+          } else if (!hasExplicitFrom) {
             fromAddressInput.value = '';
             fromAddressInput.placeholder = 'No SMTP config found - enter from address';
           }
         }
+
       } catch (error) {
         console.warn('[ComposeView] Failed to load SMTP config:', error);
         if (fromAddressInput) {
-          fromAddressInput.value = '';
-          fromAddressInput.placeholder = 'SMTP config unavailable - enter from address';
+          if (!fromAddressInput.value.trim()) {
+            fromAddressInput.value = '';
+            fromAddressInput.placeholder = 'SMTP config unavailable - enter from address';
+          }
         }
       }
       
@@ -1272,6 +1342,43 @@ class ComposeView implements IView {
       option.textContent = `${message.subject || 'No Subject'} ${dateStr}`;
       select.appendChild(option);
     });
+  }
+
+  private async loadMailingListsDropdown(): Promise<void> {
+    const select = document.querySelector('#mailingListSelect') as HTMLSelectElement | null;
+    if (!select || !this.currentAppId) return;
+    try {
+      const lists = await api(`/api/mailinglists?appId=${encodeURIComponent(this.currentAppId)}`);
+      select.innerHTML = '<option value="">Select a mailing list...</option>';
+      (lists || []).forEach((l: any) => {
+        const opt = document.createElement('option');
+        opt.value = String(l.id);
+        opt.textContent = `${l.name} (${l.memberCount ?? 0})`;
+        select.appendChild(opt);
+      });
+    } catch (err) {
+      console.warn('[ComposeView] Failed to load mailing lists:', err);
+    }
+  }
+
+  private async onMailingListSelected(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    const id = select.value;
+    if (!id || !this.currentAppId) return;
+    try {
+      const list = await api(`/api/mailinglists/${encodeURIComponent(id)}?appId=${encodeURIComponent(this.currentAppId)}`);
+      const members: Array<{ email: string; name?: string }> = list?.members || [];
+      const recipients = document.querySelector('#recipients') as HTMLTextAreaElement | null;
+      if (!recipients) return;
+      const formatted = members
+        .map(m => (m.name ? `${m.name} <${m.email}>` : m.email))
+        .filter(Boolean)
+        .join('\n');
+      recipients.value = formatted;
+      this.updateRecipientCount();
+    } catch (err) {
+      console.warn('[ComposeView] Failed to load mailing list members:', err);
+    }
   }
 
   private setupComposeEventListeners(): void {
@@ -1315,6 +1422,23 @@ class ComposeView implements IView {
     const previousSelect = document.querySelector('#previousMessageSelect') as HTMLSelectElement;
     if (previousSelect) {
       previousSelect.addEventListener('change', this.onPreviousMessageSelected.bind(this));
+    }
+
+    const mailingListSelect = document.querySelector('#mailingListSelect') as HTMLSelectElement;
+    if (mailingListSelect) {
+      mailingListSelect.addEventListener('change', this.onMailingListSelected.bind(this));
+    }
+
+    const sendTestBtn = document.getElementById('sendTestBtn') as HTMLInputElement | null;
+    if (sendTestBtn) {
+      console.log('[ComposeView] Wiring send test button');
+      sendTestBtn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        console.log('[ComposeView] Send test button clicked');
+        await sendTestEmailFromCompose();
+      });
+    } else {
+      console.warn('[ComposeView] Send test button not found');
     }
 
     this.eventListenersSetup = true;
@@ -1977,6 +2101,13 @@ class SmsComposeView implements IView {
     // Get parameters from URL
     const urlParams = new URLSearchParams(window.location.search);
     const appIdFromUrl = urlParams.get('appId');
+    
+    // Save returnUrl to localStorage for post-send redirect (mirrors ComposeView behavior)
+    const returnUrlFromUrl = urlParams.get('returnUrl');
+    if (returnUrlFromUrl) {
+      localStorage.setItem('editorReturnUrl', returnUrlFromUrl);
+      console.log('[SmsComposeView] Saved returnUrl:', returnUrlFromUrl);
+    }
     
     // Re-read URL params to get the latest values
     const currentParams = new URLSearchParams(window.location.search);
@@ -3321,6 +3452,400 @@ class EmailLogsView implements IView {
   }
 }
 
+class MailingListsView implements IView {
+  readonly name = 'mailinglists';
+  readonly elementId = 'view-mailinglists';
+  private currentAppId: string | null = null;
+  private lists: any[] = [];
+  private selectedListId: number | null = null;
+
+  constructor() {
+    registerView(this);
+  }
+
+  async initialize(): Promise<void> {
+    const createBtn = document.getElementById('createMailingListBtn');
+    if (createBtn) {
+      createBtn.addEventListener('click', () => this.promptCreateList());
+    }
+  }
+
+  async activate(): Promise<void> {
+    const urlParams = new URLSearchParams(window.location.search);
+    const appIdFromUrl = urlParams.get('appId');
+    if (appIdFromUrl) {
+      this.currentAppId = appIdFromUrl;
+    } else {
+      this.currentAppId = getCurrentAppId();
+    }
+    updateViewTitle('mailinglists', this.currentAppId || undefined);
+
+    // Load app-specific custom CSS + embedded menu (background, banner) so
+    // this view matches compose-mail's app-integrated styling.
+    if (this.currentAppId) {
+      try {
+        await loadCustomCSS(this.currentAppId);
+      } catch (error) {
+        console.warn('[MailingListsView] Failed to load custom CSS:', error);
+      }
+    }
+
+    await this.loadLists();
+  }
+
+  deactivate(): void {}
+
+  saveState(): any {
+    return { selectedListId: this.selectedListId };
+  }
+
+  async restoreState(state: any): Promise<void> {
+    if (state?.selectedListId) {
+      this.selectedListId = state.selectedListId;
+    }
+  }
+
+  canAccess(_userRoles: string[]): boolean {
+    return true;
+  }
+
+  private setStatus(msg: string, isError = false): void {
+    const el = document.getElementById('mailingListsStatus');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = isError ? '#ff6b6b' : '#81c784';
+    if (msg) {
+      setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+    }
+  }
+
+  private authHeaders(): Record<string, string> {
+    return { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' };
+  }
+
+  private async loadLists(opts: { soft?: boolean } = {}): Promise<void> {
+    const panel = document.getElementById('mailingListsListPanel');
+    if (!panel) return;
+    if (!this.currentAppId) {
+      panel.innerHTML = '<div class="text-muted">Select an app first.</div>';
+      return;
+    }
+    if (!opts.soft) {
+      panel.innerHTML = '<div class="loading">Loading lists...</div>';
+    }
+    try {
+      const res = await fetch(`/api/mailinglists?appId=${encodeURIComponent(this.currentAppId)}`, {
+        headers: this.authHeaders()
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.lists = await res.json();
+      this.renderLists();
+      if (this.selectedListId && this.lists.find(l => l.id === this.selectedListId)) {
+        await this.loadListDetail(this.selectedListId, { soft: opts.soft });
+      }
+    } catch (e: any) {
+      panel.innerHTML = `<div class="text-danger">Failed to load lists: ${e.message}</div>`;
+    }
+  }
+
+  private renderLists(): void {
+    const panel = document.getElementById('mailingListsListPanel');
+    if (!panel) return;
+    if (!this.lists.length) {
+      panel.innerHTML = '<div class="text-muted">No mailing lists yet. Click "+ New List" to create one.</div>';
+      return;
+    }
+    panel.innerHTML = '';
+    const ul = document.createElement('ul');
+    ul.className = 'mailinglists-list';
+    this.lists.forEach(list => {
+      const row = document.createElement('li');
+      row.className = 'mailinglist-row';
+      if (this.selectedListId === list.id) row.classList.add('active');
+      row.addEventListener('click', () => this.loadListDetail(list.id));
+
+      const name = document.createElement('span');
+      name.className = 'mailinglist-name';
+      name.textContent = list.name;
+
+      const count = document.createElement('span');
+      count.className = 'mailinglist-count';
+      count.textContent = `(${list.memberCount})`;
+
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.textContent = '✎';
+      renameBtn.className = 'btn btn-sm btn-outline-secondary';
+      renameBtn.title = 'Rename';
+      renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this.promptRenameList(list); });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = '🗑';
+      delBtn.className = 'btn btn-sm btn-outline-danger';
+      delBtn.title = 'Delete';
+      delBtn.addEventListener('click', (e) => { e.stopPropagation(); this.confirmDeleteList(list); });
+
+      row.appendChild(name);
+      row.appendChild(count);
+      row.appendChild(renameBtn);
+      row.appendChild(delBtn);
+      ul.appendChild(row);
+    });
+    panel.appendChild(ul);
+  }
+
+  private async loadListDetail(listId: number, opts: { soft?: boolean } = {}): Promise<void> {
+    if (!this.currentAppId) return;
+    this.selectedListId = listId;
+    this.renderLists();
+    const detail = document.getElementById('mailingListsDetailPanel');
+    if (!detail) return;
+    const isEmpty = !detail.querySelector('.mailinglist-detail-header');
+    if (!opts.soft || isEmpty) {
+      detail.innerHTML = '<div class="loading">Loading members...</div>';
+    }
+    try {
+      const res = await fetch(`/api/mailinglists/${listId}?appId=${encodeURIComponent(this.currentAppId)}`, {
+        headers: this.authHeaders()
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const list = await res.json();
+      this.renderDetail(list);
+    } catch (e: any) {
+      detail.innerHTML = `<div class="text-danger">Failed to load: ${e.message}</div>`;
+    }
+  }
+
+  private renderDetail(list: any): void {
+    const detail = document.getElementById('mailingListsDetailPanel');
+    if (!detail) return;
+    detail.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'mailinglist-detail-header';
+    const title = document.createElement('h3');
+    title.textContent = list.name;
+    header.appendChild(title);
+    detail.appendChild(header);
+
+    const addForm = document.createElement('div');
+    addForm.className = 'mailinglist-add-form mail-fields';
+    addForm.innerHTML = `
+      <div class="row g-2 align-items-end">
+        <div class="col-sm-5">
+          <div class="form-group mb-0">
+            <label for="newMemberName">Name <span class="text-muted">(optional)</span></label>
+            <input type="text" id="newMemberName" class="form-control" placeholder="Jane Doe">
+          </div>
+        </div>
+        <div class="col-sm-5">
+          <div class="form-group mb-0">
+            <label for="newMemberEmail">Email</label>
+            <input type="email" id="newMemberEmail" class="form-control" placeholder="jane@example.com" required>
+          </div>
+        </div>
+        <div class="col-sm-2">
+          <button id="addMemberBtn" type="button" class="btn btn-primary w-100">+ Add</button>
+        </div>
+      </div>
+    `;
+    detail.appendChild(addForm);
+    (addForm.querySelector('#addMemberBtn') as HTMLButtonElement).addEventListener('click', () => {
+      const nameEl = addForm.querySelector('#newMemberName') as HTMLInputElement;
+      const emailEl = addForm.querySelector('#newMemberEmail') as HTMLInputElement;
+      this.addMember(list.id, nameEl.value, emailEl.value);
+    });
+    (addForm.querySelector('#newMemberEmail') as HTMLInputElement).addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') {
+        e.preventDefault();
+        (addForm.querySelector('#addMemberBtn') as HTMLButtonElement).click();
+      }
+    });
+
+    const members = list.members || [];
+    if (!members.length) {
+      const empty = document.createElement('div');
+      empty.className = 'text-muted mt-3';
+      empty.textContent = 'No members yet. Add one above.';
+      detail.appendChild(empty);
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'mailinglist-members-table';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody')!;
+    members.forEach((m: any) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm member-name" value="${this.escapeAttr(m.name || '')}"></td>
+        <td><input type="email" class="form-control form-control-sm member-email" value="${this.escapeAttr(m.email)}"></td>
+        <td class="actions">
+          <button type="button" class="btn btn-sm btn-secondary saveMember">Save</button>
+          <button type="button" class="btn btn-sm btn-danger removeMember">✕</button>
+        </td>
+      `;
+      (tr.querySelector('.saveMember') as HTMLButtonElement).addEventListener('click', () => {
+        const name = (tr.querySelector('.member-name') as HTMLInputElement).value;
+        const email = (tr.querySelector('.member-email') as HTMLInputElement).value;
+        this.saveMember(list.id, m.id, name, email);
+      });
+      (tr.querySelector('.removeMember') as HTMLButtonElement).addEventListener('click', () => {
+        this.removeMember(list.id, m.id, m.email);
+      });
+      tbody.appendChild(tr);
+    });
+    detail.appendChild(table);
+  }
+
+  private escapeAttr(s: string): string {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  private async promptCreateList(): Promise<void> {
+    if (!this.currentAppId) {
+      this.setStatus('No app selected', true);
+      return;
+    }
+    const name = prompt('Name for new mailing list:');
+    if (!name || !name.trim()) return;
+    try {
+      const res = await fetch('/api/mailinglists', {
+        method: 'POST',
+        headers: this.authHeaders(),
+        body: JSON.stringify({ appId: this.currentAppId, name: name.trim() })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const created = await res.json();
+      this.setStatus(`Created list "${created.name}"`);
+      this.selectedListId = created.id;
+      await this.loadLists();
+    } catch (e: any) {
+      this.setStatus(`Create failed: ${e.message}`, true);
+    }
+  }
+
+  private async promptRenameList(list: any): Promise<void> {
+    if (!this.currentAppId) return;
+    const newName = prompt(`Rename "${list.name}" to:`, list.name);
+    if (!newName || !newName.trim() || newName.trim() === list.name) return;
+    try {
+      const res = await fetch(`/api/mailinglists/${list.id}`, {
+        method: 'PATCH',
+        headers: this.authHeaders(),
+        body: JSON.stringify({ appId: this.currentAppId, name: newName.trim() })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      this.setStatus('Renamed');
+      await this.loadLists();
+    } catch (e: any) {
+      this.setStatus(`Rename failed: ${e.message}`, true);
+    }
+  }
+
+  private async confirmDeleteList(list: any): Promise<void> {
+    if (!this.currentAppId) return;
+    if (!confirm(`Delete mailing list "${list.name}" and all its members?`)) return;
+    try {
+      const res = await fetch(`/api/mailinglists/${list.id}?appId=${encodeURIComponent(this.currentAppId)}`, {
+        method: 'DELETE',
+        headers: this.authHeaders()
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      this.setStatus('Deleted');
+      if (this.selectedListId === list.id) {
+        this.selectedListId = null;
+        const detail = document.getElementById('mailingListsDetailPanel');
+        if (detail) detail.innerHTML = '<div class="text-muted">Select a mailing list to view its members.</div>';
+      }
+      await this.loadLists();
+    } catch (e: any) {
+      this.setStatus(`Delete failed: ${e.message}`, true);
+    }
+  }
+
+  private async addMember(listId: number, name: string, email: string): Promise<void> {
+    if (!this.currentAppId) return;
+    if (!email.trim()) {
+      this.setStatus('Email is required', true);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/mailinglists/${listId}/members`, {
+        method: 'POST',
+        headers: this.authHeaders(),
+        body: JSON.stringify({ appId: this.currentAppId, name, email })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      this.setStatus('Member added');
+      await this.loadListDetail(listId, { soft: true });
+      await this.loadLists({ soft: true });
+    } catch (e: any) {
+      this.setStatus(`Add failed: ${e.message}`, true);
+    }
+  }
+
+  private async saveMember(listId: number, memberId: number, name: string, email: string): Promise<void> {
+    if (!this.currentAppId) return;
+    try {
+      const res = await fetch(`/api/mailinglists/${listId}/members/${memberId}`, {
+        method: 'PUT',
+        headers: this.authHeaders(),
+        body: JSON.stringify({ appId: this.currentAppId, name, email })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      this.setStatus('Member saved');
+      await this.loadListDetail(listId, { soft: true });
+    } catch (e: any) {
+      this.setStatus(`Save failed: ${e.message}`, true);
+    }
+  }
+
+  private async removeMember(listId: number, memberId: number, email: string): Promise<void> {
+    if (!this.currentAppId) return;
+    if (!confirm(`Remove ${email} from this list?`)) return;
+    try {
+      const res = await fetch(`/api/mailinglists/${listId}/members/${memberId}?appId=${encodeURIComponent(this.currentAppId)}`, {
+        method: 'DELETE',
+        headers: this.authHeaders()
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      this.setStatus('Member removed');
+      await this.loadListDetail(listId, { soft: true });
+      await this.loadLists({ soft: true });
+    } catch (e: any) {
+      this.setStatus(`Remove failed: ${e.message}`, true);
+    }
+  }
+}
+
 class SmsLogsView implements IView {
   readonly name = 'sms-logs';
   readonly elementId = 'view-sms-logs';
@@ -4436,6 +4961,20 @@ async function loadAppForEditor() {
       console.log('[loadAppForEditor] No appId in URL parameters');
       return;
     }
+
+    // Prefer app context already provided by /me for app-scoped sessions.
+    if (state.user?.appId === currentAppId) {
+      state.apps = [{
+        id: currentAppId,
+        tenantId: state.user?.tenantId || '',
+        name: state.user?.appName || state.user?.appClientId || currentAppId,
+        clientId: state.user?.appClientId || currentAppId,
+      } as AppRec];
+
+      console.log('[loadAppForEditor] Using app context from /me:', state.apps[0]);
+      refreshComposeViewTitles();
+      return;
+    }
     
     console.log('[loadAppForEditor] Loading app for editor:', currentAppId);
     
@@ -4450,9 +4989,25 @@ async function loadAppForEditor() {
     // Update titles if we're in a compose view
     refreshComposeViewTitles();
   } catch (e) {
-    console.error('[loadAppForEditor] Failed to load app for editor:', e);
-    // If we can't load the app info, at least initialize an empty array
-    state.apps = [];
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentAppId = urlParams.get('appId');
+
+    if (!currentAppId) {
+      console.warn('[loadAppForEditor] Failed to load app and no appId available for fallback');
+      state.apps = [];
+      return;
+    }
+
+    // Some deployments deny /apps/:id for app-scoped tokens. Fall back to URL/user context.
+    state.apps = [{
+      id: currentAppId,
+      tenantId: state.user?.tenantId || '',
+      name: state.user?.appName || state.user?.appClientId || currentAppId,
+      clientId: state.user?.appClientId || currentAppId,
+    } as AppRec];
+
+    console.warn('[loadAppForEditor] Falling back to app context from URL/user context');
+    refreshComposeViewTitles();
   }
 }
 
@@ -4599,10 +5154,13 @@ function onAuthenticated(cameFromIdp: boolean = false) {
     // Skip loading apps for editor-only users to avoid 403 errors
     const roleList: string[] = state.user?.roles || [];
     const isEditorOnly = roleList.includes('editor') && !roleList.some(r=> r==='tenant_admin' || r==='superadmin');
-    if (tenantId && !isEditorOnly) {
+    const authUrlParams = new URLSearchParams(window.location.search);
+    const isAppIntegratedMode = isAppIntegratedModeFromParams(authUrlParams);
+
+    if (tenantId && !isEditorOnly && !isAppIntegratedMode) {
       await loadApps();
-    } else if (isEditorOnly) {
-      // For editor-only users, try to load the specific app they're working with
+    } else if (isEditorOnly || isAppIntegratedMode) {
+      // For editor-only and app-integrated launches, load only current app context.
       await loadAppForEditor();
     }
     updateEnvInfo();
@@ -4978,12 +5536,15 @@ function getViewTitle(viewName: string, currentAppId?: string): { appTitle: stri
     case 'template-editor':
       viewFunction = 'Template Editor';
       break;
+    case 'mailinglists':
+      viewFunction = 'Mailing Lists';
+      break;
     default:
       viewFunction = 'Mail Service';
   }
   
   // For app-specific contexts (compose, logs, etc.), show app name prominently
-  if (appLabel && (viewName === 'compose' || viewName === 'sms-compose' || viewName === 'email-logs' || viewName === 'sms-logs')) {
+  if (appLabel && (viewName === 'compose' || viewName === 'sms-compose' || viewName === 'email-logs' || viewName === 'sms-logs' || viewName === 'mailinglists')) {
     // Set document title to include both app and function
     document.title = `${appLabel} - ${viewFunction}`;
     return { appTitle: appLabel, viewFunction: viewFunction };
@@ -5399,8 +5960,8 @@ function setRoleBasedVisibility() {
   
   // Define all UI elements that can be controlled
   const allUIElements: Record<string, HTMLElement | null> = {
-    tenantsBtn: document.querySelector('.navBtn[data-view="tenants"]'),
-    appsBtn: document.querySelector('.navBtn[data-view="apps"]'),
+    tenantsBtn: document.querySelector('[data-view="tenants"]'),
+    appsBtn: document.querySelector('[data-view="apps"]'),
     templateEditorBtn: document.getElementById('templateEditorNavBtn'),
     emailLogsBtn: document.getElementById('emailLogsNavBtn'),
     smsLogsBtn: document.getElementById('smsLogsNavBtn'),
@@ -5461,7 +6022,7 @@ function setRoleBasedVisibility() {
   });
   
   // App integration compose: hide navigation when coming from app for compose
-  const isAppIntegratedCompose = returnUrl && !isExternalLogViewing;
+  const isAppIntegratedCompose = (isAppIntegratedModeFromParams(urlParams) && !isExternalLogViewing);
   
   if (isExternalLogViewing) {
     // For external log viewing, hide most UI except userPane for return button
@@ -5639,10 +6200,12 @@ async function initializeViews(): Promise<void> {
   const smsConfigView = new SmsConfigView();
   const emailLogsView = new EmailLogsView();
   const smsLogsView = new SmsLogsView();
+  const mailingListsView = new MailingListsView();
   
   // Make log views globally accessible for onclick handlers
   (window as any).emailLogsView = emailLogsView;
   (window as any).smsLogsView = smsLogsView;
+  (window as any).mailingListsView = mailingListsView;
   
   // Initialize all views
   await composeView.initialize();
@@ -5654,6 +6217,7 @@ async function initializeViews(): Promise<void> {
   await smsConfigView.initialize();
   await emailLogsView.initialize();
   await smsLogsView.initialize();
+  await mailingListsView.initialize();
   
   debugLog('ViewRegistry', 'Views initialized and registered');
   console.log('[ViewRegistry] Views initialized and registered');
@@ -5763,6 +6327,8 @@ async function init() {
 
   // Accept token passed via URL strictly as a query parameter: ?token=JWT
   const url = new URL(window.location.href);
+  const requestedView = url.searchParams.get('view') || '';
+  const isAppIntegratedMode = isAppIntegratedModeFromParams(url.searchParams);
   // Capture multi-tenant/app hints from URL if provided by the referring app
   const tenantHint = url.searchParams.get('tenantId');
   const clientIdHint = url.searchParams.get('clientId');
@@ -5773,8 +6339,9 @@ async function init() {
   if (clientIdHint) { try { localStorage.setItem('appClientIdHint', clientIdHint); } catch {} }
   if (appIdHint) { try { localStorage.setItem('appIdHint', appIdHint); } catch {} }
   
-  // Load custom CSS for the application
-  if (appIdHint) {
+  // Load custom CSS only for views where app branding is needed.
+  const shouldLoadCustomCss = !requestedView || ['compose', 'sms-compose', 'email-logs', 'sms-logs'].includes(requestedView);
+  if (appIdHint && shouldLoadCustomCss) {
     await loadCustomCSS(appIdHint);
   }
   
@@ -5969,12 +6536,14 @@ async function init() {
   // Load tenants if superadmin or if auth is disabled (for SMTP config to work)
   if (roleList.includes('superadmin') || authDisabled) { await loadTenants(); }
   // Load apps if we have a tenantId or if auth is disabled - but skip for editor-only users
-  if (!isEditorOnly) {
+  if (!isEditorOnly && !isAppIntegratedMode) {
     if (tenantId) {
       await loadApps(); // Load apps for specific tenant
     } else if (authDisabled) {
       await loadAllApps(); // Load all apps for SMTP config dropdowns
     }
+  } else if (isAppIntegratedMode) {
+    await loadAppForEditor();
   }
   // If appId from token is present, prefer it for initial context
   if (state.user?.appId && (!appId || appId !== state.user.appId)) {
@@ -5992,8 +6561,9 @@ async function init() {
   // wireNav() is already called in onAuthenticated() - no need to call again
   wireAppManagement();
   
-  // Skip admin-only configuration setup for editor-only users
-  if (!isEditorOnly) {
+  // Skip admin config bootstrapping in app-integrated mode (compose/template/log embeds)
+  // to avoid unnecessary /apps loading and permission/cors noise.
+  if (!isEditorOnly && !isAppIntegratedMode) {
     setupSmtpConfig();
     setupSmsConfig();
   }
@@ -6170,6 +6740,7 @@ async function restorePageState() {
           case 'email-logs':
           case 'sms-logs':
           case 'sms-compose':
+          case 'mailinglists':
             // Use ViewRegistry for managed views
             const roles: string[] = state.user?.roles || [];
             await viewRegistry.showView(urlView, roles);
@@ -6401,9 +6972,11 @@ function setupHistoryHandling() {
   // Replace the initial history entry to prevent going back to IDP
   if (window.location.search.includes('token=')) {
     console.debug('[page-state] Replacing IDP history entry');
-    // We came from IDP, replace this history entry
+    // We came from IDP - remove the token from the URL but preserve all other
+    // params (recipients, fromName, fromAddress, subject, returnUrl, etc.)
+    // so ComposeView/SmsComposeView can read them when they activate.
     const cleanUrl = new URL(window.location.href);
-    cleanUrl.search = '';
+    cleanUrl.searchParams.delete('token');
     history.replaceState({ currentView: 'compose' }, '', cleanUrl.toString());
   }
 }
@@ -8840,7 +9413,9 @@ class ComposeElements {
         templateSelect: '#templateSelect',
         previousMessageSelect: '#previousMessageSelect',
         recipientCount: '#addressCount',
-        contentHidden: '#messageContentHidden'
+    contentHidden: '#messageContentHidden',
+    sendTestBtn: '#sendTestBtn',
+    testRecipient: '#testRecipient'
     } as const;
 
     static get recipients(): HTMLTextAreaElement | null {
@@ -8873,6 +9448,14 @@ class ComposeElements {
 
     static get contentHidden(): HTMLTextAreaElement | null {
         return document.querySelector(this.ELEMENT_IDS.contentHidden);
+    }
+
+    static get sendTestBtn(): HTMLInputElement | null {
+      return document.querySelector(this.ELEMENT_IDS.sendTestBtn);
+    }
+
+    static get testRecipient(): HTMLInputElement | null {
+      return document.querySelector(this.ELEMENT_IDS.testRecipient);
     }
 
     static getFormData(): ComposeFormData {
@@ -8977,6 +9560,17 @@ class ComposeElements {
                 characterData: true
             });
         }
+
+          // Send test button
+          if (this.sendTestBtn) {
+            console.log('[Compose] Send test button found, wiring click handler');
+            this.sendTestBtn.addEventListener('click', async () => {
+              console.log('[Compose] Send test button clicked');
+              await sendTestEmailFromCompose();
+            });
+          } else {
+            console.warn('[Compose] Send test button not found in DOM');
+          }
     }
 }
 
@@ -8986,7 +9580,8 @@ let composeState = {
     previousMessages: [] as any[],
     recipientCount: 0,
     eventListenersSetup: false,
-    recipientsData: [] as any[]
+  recipientsData: [] as any[],
+  fromName: '' as string
 };
 
 // State persistence utilities
@@ -9643,6 +10238,20 @@ function updateRecipientCount() {
     ComposeElements.updateRecipientCount(composeState.recipientCount);
 }
 
+function parseFromField(rawFrom: string, fallbackName: string): { fromAddress: string; fromName: string } {
+  const trimmed = rawFrom.trim();
+  const match = trimmed.match(/^(.*)<\s*([^>]+)\s*>$/);
+  if (match) {
+    const name = match[1].trim().replace(/^"|"$/g, '');
+    const email = match[2].trim();
+    return {
+      fromAddress: email,
+      fromName: fallbackName || name
+    };
+  }
+  return { fromAddress: trimmed, fromName: fallbackName };
+}
+
 // Shared function for loading content into the rich text editor
 function loadContentIntoEditor(content: string, contentType: string) {
     console.log(`[Debug] ${contentType} content:`, content);
@@ -9755,6 +10364,10 @@ async function sendComposedMessage() {
         
         const recipients = (formData.get('recipients') as string || '').trim();
         const subject = (formData.get('subject') as string || '').trim();
+        const fromRaw = (formData.get('fromAddress') as string || '').trim();
+        const fromParsed = parseFromField(fromRaw, composeState.fromName || '');
+        const fromAddress = fromParsed.fromAddress;
+        const fromName = fromParsed.fromName;
         const sendMode = ($('#sendMode') as HTMLSelectElement).value || 'individual';
         
         // Debug form values
@@ -9778,6 +10391,11 @@ async function sendComposedMessage() {
         if (!messageContent || messageContent.trim() === '') {
             showStatusMessage($('#composeStatus') as HTMLElement, 'Please enter message content');
             return;
+        }
+
+        if (!fromAddress) {
+          showStatusMessage($('#composeStatus') as HTMLElement, 'Please enter a from address');
+          return;
         }
         
         // Show sending status
@@ -9864,8 +10482,10 @@ async function sendComposedMessage() {
                 appId: currentAppId,
                 subject: subject, // Raw template subject (may contain ${variable} placeholders)
                 html: messageContent, // Raw template HTML (may contain ${variable} placeholders)
-                recipients: recipientsData, // Recipients with full context data for template processing
-                sendMode: sendMode
+            recipients: recipientsData, // Recipients with full context data for template processing
+            sendMode: sendMode,
+            fromAddress,
+            fromName: fromName || undefined
             })
         });
         
@@ -9884,6 +10504,86 @@ async function sendComposedMessage() {
         console.error('[Compose] Send failed:', error);
         showStatusMessage($('#composeStatus') as HTMLElement, 'Send failed: ' + (error as Error).message);
     }
+}
+
+async function sendTestEmailFromCompose() {
+  console.log('[Compose] sendTestEmailFromCompose invoked');
+  const statusEl = $('#composeStatus') as HTMLElement;
+  const testRecipient = ComposeElements.testRecipient?.value.trim() || '';
+
+  const urlAppId = new URLSearchParams(window.location.search).get('appId');
+  const resolvedAppId = composeState.currentAppId || urlAppId || state.user?.appId || null;
+  if (!composeState.currentAppId && resolvedAppId) {
+    composeState.currentAppId = resolvedAppId;
+    console.log('[Compose] Resolved appId for test send:', resolvedAppId);
+  }
+
+  if (!testRecipient) {
+    console.warn('[Compose] Test send blocked: missing test recipient');
+    showStatusMessage(statusEl, 'Please enter a test recipient email.');
+    ComposeElements.testRecipient?.focus();
+    return;
+  }
+
+  if (!composeState.currentAppId) {
+    console.warn('[Compose] Test send blocked: missing appId');
+    showStatusMessage(statusEl, 'Error: No app ID found. Please refresh and try again.');
+    return;
+  }
+
+  const subject = ComposeElements.subject?.value.trim() || '';
+  const html = ComposeElements.getTinyMCEContent().trim();
+  const text = stripHtml(html).trim();
+  console.log('[Compose] Test send payload preview:', {
+    to: testRecipient,
+    hasSubject: !!subject,
+    subjectLength: subject.length,
+    htmlLength: html.length,
+    textLength: text.length,
+    appId: composeState.currentAppId
+  });
+
+  if (!subject) {
+    console.warn('[Compose] Test send blocked: missing subject');
+    showStatusMessage(statusEl, 'Subject is required for test send.');
+    ComposeElements.subject?.focus();
+    return;
+  }
+
+  if (!html && !text) {
+    console.warn('[Compose] Test send blocked: missing content');
+    showStatusMessage(statusEl, 'Message content is required for test send.');
+    return;
+  }
+
+  const sendBtn = ComposeElements.sendTestBtn;
+  if (sendBtn) sendBtn.disabled = true;
+
+  try {
+    showStatusMessage(statusEl, 'Sending test email...');
+
+    const tenantId = extractTenantFromAppId(composeState.currentAppId) || undefined;
+
+    const result = await api('/api/send-test', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: testRecipient,
+        subject,
+        html,
+        text,
+        appId: composeState.currentAppId,
+        tenantId
+      })
+    });
+
+    console.log('[Compose] Test send result:', result);
+    showStatusMessage(statusEl, `Test email sent to ${testRecipient}.`);
+  } catch (error) {
+    console.error('[Compose] Test send failed:', error);
+    showStatusMessage(statusEl, 'Test send failed: ' + (error as Error).message);
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
 }
 
 // Show send summary dialog
@@ -9913,7 +10613,7 @@ function showSendSummaryDialog(result: any, recipientCount: number) {
     alert(message);
     
     // For editors, return to calling app after successful send
-    returnToCallingAppFromCompose();
+    returnToCallingAppFromCompose(result);
 }
 
 // Show SMS send summary dialog
@@ -9957,7 +10657,7 @@ function showSmsSendSummaryDialog(result: any, recipientCount: number) {
 }
 
 // Return to calling application from compose view (for editors)
-function returnToCallingAppFromCompose() {
+function returnToCallingAppFromCompose(sendResult?: any) {
     const urlParams = new URLSearchParams(window.location.search);
     let returnUrl = urlParams.get('returnUrl');
     
@@ -9966,27 +10666,21 @@ function returnToCallingAppFromCompose() {
         returnUrl = localStorage.getItem('editorReturnUrl');
     }
     
-    // If there's a returnUrl, this means we were opened from an external app in a new window
-    // The window should close itself (popup behavior)
     if (returnUrl) {
-        console.log('[UI] Closing compose window (opened from external app)');
+        console.log('[UI] Returning to calling app:', returnUrl);
         
         // Clear the saved returnUrl
         localStorage.removeItem('editorReturnUrl');
         
-        // Close the window
-        try {
-            window.close();
-            // If window.close() doesn't work immediately, show a message
-            setTimeout(() => {
-                if (!window.closed) {
-                    alert('Action completed! You can now close this window.');
-                }
-            }, 100);
-        } catch (error) {
-            console.warn('[UI] Could not close window:', error);
-            alert('Action completed! Please close this window.');
+        // Append send result data to returnUrl so calling app knows delivery status
+        const url = new URL(returnUrl, window.location.origin);
+        if (sendResult) {
+            if (sendResult.groupId) url.searchParams.set('groupId', sendResult.groupId);
+            if (sendResult.jobCount !== undefined) url.searchParams.set('jobCount', String(sendResult.jobCount));
         }
+        
+        // Redirect back to the calling application
+        window.location.href = url.toString();
         return;
     }
     

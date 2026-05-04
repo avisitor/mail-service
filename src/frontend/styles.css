@@ -40,6 +40,11 @@ header {
   padding-bottom: 2px !important;
 }
 
+/* Prevent first-paint nav flash; role logic explicitly reveals allowed buttons later. */
+.topnav button[data-view] {
+    display: none !important;
+}
+
 /* Navigation button groupings */
 .nav-group {
   display: flex !important;
@@ -66,17 +71,11 @@ header {
 
 /* Use Bootstrap btn classes instead of custom navBtn styling */
 
-/* Hide ALL role-restricted buttons by default - only JavaScript capability system can show them */
-.navBtn[data-view="tenants"],
-.navBtn[data-view="apps"],
-.navBtn[id="templateEditorNavBtn"],
-.navBtn[id="emailLogsNavBtn"],
-.navBtn[id="smsLogsNavBtn"],
-.navBtn[data-view="smtp-config"],
-.navBtn[data-view="sms-config"],
-.navBtn[data-view="compose"],
-.navBtn[data-view="sms-compose"] {
-  display: none !important;
+/* Hide role-restricted elements by default; JS capability system reveals what is allowed. */
+#templateEditorNavBtn,
+#emailLogsNavBtn,
+#smsLogsNavBtn {
+    display: none !important;
 }
 
 /* Hide other role-restricted elements by default, but keep topnav visible for layout */
@@ -1134,5 +1133,121 @@ textarea:disabled {
 /* Utility classes for Bootstrap compatibility */
 .cursor-pointer {
     cursor: pointer;
+}
+
+/* Mailing Lists view: theme-neutral, inherits page colors so app custom CSS can paint it. */
+.mailinglists-container {
+    max-width: 1100px;
+}
+
+.mailinglists-panel {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    padding: 16px;
+    min-height: 360px;
+    background: rgba(255, 255, 255, 0.92) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    color: #222 !important;
+}
+
+.mailinglists-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.mailinglist-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    margin-bottom: 2px;
+    color: inherit;
+}
+
+.mailinglist-row:hover {
+    background: rgba(128, 128, 128, 0.12);
+}
+
+.mailinglist-row.active {
+    background: #2a4a5a;
+    border-color: #4FC3F7;
+    color: #ffffff;
+}
+
+.mailinglist-row.active .mailinglist-count {
+    color: #cfe9f5;
+}
+
+.mailinglist-name {
+    flex: 1;
+    color: inherit;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mailinglist-count {
+    color: inherit;
+    opacity: 0.65;
+    font-size: 0.85em;
+    margin-left: 4px;
+}
+
+.mailinglist-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.mailinglist-detail-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: inherit;
+}
+
+.mailinglist-add-form {
+    margin-bottom: 12px;
+}
+
+.mailinglist-add-form .form-group {
+    margin-bottom: 12px;
+}
+
+.mailinglist-members-wrap {
+    min-height: 200px;
+}
+
+.mailinglist-members-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+
+.mailinglist-members-table th {
+    text-align: left;
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    font-weight: 600;
+    color: inherit;
+    opacity: 0.85;
+}
+
+.mailinglist-members-table td {
+    padding: 6px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+    vertical-align: middle;
+}
+
+.mailinglist-members-table .actions {
+    white-space: nowrap;
+    width: 1%;
 }
 

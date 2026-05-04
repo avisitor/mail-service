@@ -23,14 +23,23 @@ export async function registerTemplateRoutes(app: FastifyInstance) {
     // Get templates for the specified app
     try {
       const prisma = (await import('../../db/prisma.js')).getPrisma();
+      // Resolve app id or client id to actual app record
+      let appRecord = await prisma.app.findUnique({ where: { id: appId } });
+      if (!appRecord) {
+        appRecord = await prisma.app.findUnique({ where: { clientId: appId } });
+      }
+      if (!appRecord) {
+        return reply.badRequest('App not found (provide app id or clientId)');
+      }
+
       const allTemplates = await prisma.template.findMany({
         where: { 
-          appId: appId,
+          appId: appRecord.id,
           isActive: true 
         },
         orderBy: { createdAt: 'desc' }
       });
-      app.log.info(`Found ${allTemplates.length} templates for appId: ${appId}`);
+      app.log.info(`Found ${allTemplates.length} templates for appId: ${appRecord.id}`);
       
       // Filter out templates with null or empty content in JavaScript
       const validTemplates = allTemplates.filter(template => 

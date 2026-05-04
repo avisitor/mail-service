@@ -8,6 +8,9 @@
   "maunaala-app-id": {
     "configUrl": "https://outings.worldspot.org/maunaala/config/mail-config.json"
   },
+  "mailgroups-app-id": {
+    "configUrl": "https://mailgroups.worldspot.org/config/mail-config.json"
+  },
   "cmfm6bqcj0003ylk8qbr4e9hb": {
     "title": "Outings",
     "description": "Outing management and scheduling application (alternate instance)",

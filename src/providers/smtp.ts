@@ -234,6 +234,8 @@ export interface SendEmailInput {
   appId?: string;
   // Flag to use test SMTP configuration instead of resolved config
   testEmail?: boolean;
+  fromName?: string;
+  fromAddress?: string;
 }
 
 export async function sendEmail(input: SendEmailInput) {
@@ -321,6 +323,9 @@ export async function sendEmail(input: SendEmailInput) {
     fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user || '';
     fromName = smtpConfig.fromName;
   }
+
+  if (input.fromAddress) fromAddr = input.fromAddress;
+  if (input.fromName) fromName = input.fromName;
 
   const from = fromName && fromAddr ? `${fromName} <${fromAddr}>` : fromAddr;
   

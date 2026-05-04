@@ -20,6 +20,7 @@ import { createIdpRedirectUrl, checkAuthentication } from './auth/idp-redirect.j
 import { registerTenantRoutes } from './modules/tenants/routes.js';
 import { registerAppRoutes } from './modules/apps/routes.js';
 import { registerLogRoutes } from './modules/logs/routes.js';
+import { registerMailingListRoutes } from './modules/mailinglists/routes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
@@ -95,6 +96,7 @@ export function buildApp() {
   registerTenantRoutes(app);
   registerAppRoutes(app);
   registerLogRoutes(app);
+  registerMailingListRoutes(app);
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore
@@ -233,7 +235,7 @@ export function buildApp() {
     }
     
     // Serve apps.json for frontend configuration
-    const appsPath = join(dirname(fileURLToPath(import.meta.url)), '../../keys/apps.json');
+    const appsPath = join(process.cwd(), 'keys', 'apps.json');
     if (existsSync(appsPath)) {
       app.get('/keys/apps.json', async (_req, reply) => {
         try {
@@ -763,6 +765,27 @@ export function buildApp() {
     }
   });
   
+  // Mailing lists route - same auth model as /compose: validate app, then let frontend handle auth
+  app.get('/mailinglists', async (req, reply) => {
+    const { appId } = req.query as any;
+    if (!appId) {
+      return reply.code(400).send({
+        error: 'Missing Application ID',
+        message: 'appId parameter is required for mailing lists endpoint'
+      });
+    }
+    const validation = await validateAppId(appId);
+    if (!validation.isValid) {
+      return reply.code(400).send({
+        error: 'Invalid Application',
+        message: validation.error
+      });
+    }
+    const allParams = new URLSearchParams(req.query as any);
+    allParams.set('view', 'mailinglists');
+    return reply.redirect(`/ui?${allParams}`);
+  });
+  
   // Test send endpoint without authentication for debugging
   app.post('/api/send-test', async (req, reply) => {
     const { to, subject, html, text, tenantId, appId, testEmail } = (req.body as any) || {};
@@ -883,7 +906,7 @@ export function buildApp() {
   // Payload: { appId, templateId?, subject, html?, text?, recipients: [ { email, name?, context? } ], testEmail? }
   app.post('/send-now', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const body = (req.body as any) || {};
-    const { appId, templateId, subject, html, text, recipients, testEmail, scheduleAt } = body;
+    const { appId, templateId, subject, html, text, recipients, testEmail, scheduleAt, fromAddress, fromName } = body;
     
     console.log('[/send-now] Received request:', {
       appId,
@@ -979,8 +1002,8 @@ export function buildApp() {
         ]
       });
       
-      const senderName = smtpConfig?.fromName || 'Mail Service';
-      const senderEmail = smtpConfig?.fromAddress || 'noreply@localhost';
+      const senderName = fromName || smtpConfig?.fromName || 'Mail Service';
+      const senderEmail = fromAddress || smtpConfig?.fromAddress || 'noreply@localhost';
       const host = smtpConfig?.host || 'localhost';
       const username = smtpConfig?.user || '';
       
@@ -1023,6 +1046,47 @@ export function buildApp() {
       return reply.internalServerError(e.message);
     }
   });
+  
+  app.get('/api/job-status/:groupId', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
+    const { groupId } = req.params as { groupId: string };
+    if (!groupId) return reply.badRequest('groupId required');
+
+    try {
+      const prismaModule = await import('./db/prisma.js');
+      const prisma = prismaModule.getPrisma();
+
+      const jobs = await prisma.emailJob.findMany({
+        where: { groupId },
+        select: {
+          jobId: true,
+          status: true,
+          recipients: true,
+          subject: true,
+          message: true,
+          senderName: true,
+          senderEmail: true,
+          lastError: true,
+          completedAt: true,
+          failedAt: true,
+        }
+      });
+
+      if (jobs.length === 0) return reply.notFound('No jobs found for groupId');
+
+      const summary = {
+        total: jobs.length,
+        completed: jobs.filter((j: any) => j.status === 'completed').length,
+        failed: jobs.filter((j: any) => j.status === 'failed').length,
+        pending: jobs.filter((j: any) => j.status === 'pending').length,
+        processing: jobs.filter((j: any) => j.status === 'processing').length,
+      };
+
+      return { groupId, summary, jobs };
+    } catch (e: any) {
+      return reply.internalServerError(e.message);
+    }
+  });
+
   // Explicit index route (fallback if static prefix mapping not matched in some env)
   app.get('/ui/index.html', async (_req, reply) => {
     try {

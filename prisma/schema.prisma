@@ -28,10 +28,35 @@ model App {
   clientSecret String?
   tenant       Tenant         @relation(fields: [tenantId], references: [id])
   groups       MessageGroup[]
+  mailingLists MailingList[]
   smsConfigs   SmsConfig[]
   smtpConfigs  SmtpConfig[]
 
   @@index([tenantId], map: "App_tenantId_fkey")
+}
+
+model MailingList {
+  id        Int                 @id @default(autoincrement())
+  appId     String
+  name      String              @db.VarChar(128)
+  createdAt DateTime            @default(now())
+  app       App                 @relation(fields: [appId], references: [id], onDelete: Cascade)
+  members   MailingListMember[]
+
+  @@unique([appId, name], map: "MailingList_appId_name_key")
+  @@index([appId], map: "MailingList_appId_idx")
+}
+
+model MailingListMember {
+  id        Int         @id @default(autoincrement())
+  listId    Int
+  name      String      @default("") @db.VarChar(64)
+  email     String      @db.VarChar(254)
+  createdAt DateTime    @default(now())
+  list      MailingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, email], map: "MailingListMember_list_email_key")
+  @@index([listId], map: "MailingListMember_listId_idx")
 }
 
 model Template {
