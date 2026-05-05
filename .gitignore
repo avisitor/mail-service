@@ -43,3 +43,4 @@ prisma/.env
 .rolesanywhere/.ssh
 .serena
 fix-rolesanywhere-permissions.sh
+**/php_errorlog

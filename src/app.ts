@@ -1125,6 +1125,11 @@ export function buildApp() {
     }
   });
 
+  // Suppress browser's automatic favicon.ico request (client apps supply their own via JS)
+  app.get('/favicon.ico', async (_req, reply) => {
+    reply.code(204).send();
+  });
+
   // Explicit index route (fallback if static prefix mapping not matched in some env)
   app.get('/ui/index.html', async (_req, reply) => {
     try {

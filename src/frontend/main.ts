@@ -231,6 +231,7 @@ interface AppConfig {
     targetSelector?: string;
     replaceTarget?: boolean;
   };
+  favicon_url?: string;
 }
 
 interface AppsConfig {
@@ -365,7 +366,21 @@ async function addAppSpecificEnhancements(appId: string, appConfig: AppConfig): 
   if (appConfig.banner) {
     addBanner(appConfig.banner);
   }
-  
+
+  // Set favicon if configured
+  if (appConfig.favicon_url) {
+    const existingFavicon = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+    if (existingFavicon) {
+      existingFavicon.setAttribute('href', appConfig.favicon_url);
+    } else {
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.href = appConfig.favicon_url;
+      document.head.appendChild(link);
+    }
+    console.log('[Favicon] Set favicon from app config:', appConfig.favicon_url);
+  }
+
   // Load embedded menu if configured
   console.log('[DEBUG] Checking for embeddedMenu configuration:', !!appConfig.embeddedMenu);
   if (appConfig.embeddedMenu) {
