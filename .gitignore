@@ -44,3 +44,6 @@ prisma/.env
 .serena
 fix-rolesanywhere-permissions.sh
 **/php_errorlog
+
+# Git worktrees
+.worktrees/
