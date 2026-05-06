@@ -15,7 +15,8 @@ export async function registerComposeRoutes(app: FastifyInstance) {
     const templates = await prisma.template.findMany({
       where: { 
         appId,
-        isActive: true
+        isActive: true,
+        kind: 'CAMPAIGN'
       },
       select: {
         id: true,

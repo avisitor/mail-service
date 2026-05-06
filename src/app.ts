@@ -21,6 +21,7 @@ import { registerTenantRoutes } from './modules/tenants/routes.js';
 import { registerAppRoutes } from './modules/apps/routes.js';
 import { registerLogRoutes } from './modules/logs/routes.js';
 import { registerMailingListRoutes } from './modules/mailinglists/routes.js';
+import { registerSubscribeRoutes } from './modules/mailinglists/subscribeRoutes.js';
 import { sendEmail } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
@@ -97,6 +98,7 @@ export function buildApp() {
   registerAppRoutes(app);
   registerLogRoutes(app);
   registerMailingListRoutes(app);
+  registerSubscribeRoutes(app);
   // Simple identity endpoint
   app.get('/me', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req) => {
     // @ts-ignore

@@ -36,42 +36,71 @@ model App {
 }
 
 model MailingList {
-  id        Int                 @id @default(autoincrement())
-  appId     String
-  name      String              @db.VarChar(128)
-  createdAt DateTime            @default(now())
-  app       App                 @relation(fields: [appId], references: [id], onDelete: Cascade)
-  members   MailingListMember[]
+  id                   Int                   @id @default(autoincrement())
+  appId                String
+  name                 String                @db.VarChar(128)
+  createdAt            DateTime              @default(now())
+  createdBy            String?               @db.VarChar(128)
+  creatorEmail         String?               @db.VarChar(254)
+  subscribePageEnabled Boolean               @default(false)
+  subscribeSlug        String?               @db.VarChar(64)
+  notifyCreatorOnJoin  Boolean               @default(false)
+  app                  App                   @relation(fields: [appId], references: [id], onDelete: Cascade)
+  members              MailingListMember[]
+  pendingSubscriptions PendingSubscription[]
+  subscribeTemplates   Template[]            @relation("MailingListTemplates")
 
   @@unique([appId, name], map: "MailingList_appId_name_key")
+  @@unique([appId, subscribeSlug], map: "MailingList_appId_slug_key")
   @@index([appId], map: "MailingList_appId_idx")
 }
 
 model MailingListMember {
-  id        Int         @id @default(autoincrement())
-  listId    Int
-  name      String      @default("") @db.VarChar(64)
-  email     String      @db.VarChar(254)
-  createdAt DateTime    @default(now())
-  list      MailingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  id               Int         @id @default(autoincrement())
+  listId           Int
+  name             String      @default("") @db.VarChar(64)
+  email            String      @db.VarChar(254)
+  createdAt        DateTime    @default(now())
+  unsubscribeToken String?     @unique(map: "MailingListMember_unsubscribeToken_key") @db.VarChar(64)
+  confirmedAt      DateTime?
+  list             MailingList @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   @@unique([listId, email], map: "MailingListMember_list_email_key")
   @@index([listId], map: "MailingListMember_listId_idx")
 }
 
+model PendingSubscription {
+  id        Int         @id @default(autoincrement())
+  listId    Int
+  email     String      @db.VarChar(254)
+  name      String      @default("") @db.VarChar(64)
+  token     String      @unique(map: "PendingSubscription_token_key") @db.VarChar(64)
+  createdAt DateTime    @default(now())
+  expiresAt DateTime
+  list      MailingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, email], map: "PendingSubscription_list_email_key")
+  @@index([expiresAt], map: "PendingSubscription_expiresAt_idx")
+}
+
 model Template {
-  id           Int            @id @default(autoincrement())
-  version      Int
-  subject      String?        @db.MediumText
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @default(now()) @updatedAt
-  appId        String         // No default - must be explicitly provided
-  content      String?        @db.MediumText
-  title        String?        @db.VarChar(64)
-  MessageGroup MessageGroup[]
+  id            Int            @id @default(autoincrement())
+  version       Int
+  subject       String?        @db.MediumText
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
+  appId         String         // No default - must be explicitly provided
+  content       String?        @db.MediumText
+  title         String?        @db.VarChar(64)
+  kind          TemplateKind   @default(CAMPAIGN)
+  mailingListId Int?
+  mailingList   MailingList?   @relation("MailingListTemplates", fields: [mailingListId], references: [id], onDelete: Cascade)
+  MessageGroup  MessageGroup[]
 
   @@index([appId], map: "Template_appId_idx")
+  @@index([appId, kind], map: "Template_appId_kind_idx")
+  @@index([mailingListId, kind], map: "Template_listId_kind_idx")
 }
 
 model MessageGroup {
@@ -300,4 +329,12 @@ enum SmsConfigScope {
   GLOBAL
   TENANT
   APP
+}
+
+enum TemplateKind {
+  CAMPAIGN
+  SUBSCRIBE_PAGE
+  CONFIRM_EMAIL
+  WELCOME_EMAIL
+  CREATOR_NOTICE
 }

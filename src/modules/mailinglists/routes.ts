@@ -9,6 +9,10 @@ import {
   addMember,
   updateMember,
   removeMember,
+  updateSubscribeSettings,
+  getSubscribeTemplate,
+  upsertSubscribeTemplate,
+  deleteSubscribeTemplate,
   MailingListError
 } from './service.js';
 import { hasRole } from '../../auth/roles.js';
@@ -90,7 +94,10 @@ export async function registerMailingListRoutes(app: FastifyInstance) {
       if (!resolved) return reply.badRequest('App not found');
       if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
       try {
-        const list = await createList(resolved, name || '');
+        const user = req.userContext as any;
+        const sub = user?.sub || null;
+        const email = user?.email || user?.claims?.email || null;
+        const list = await createList(resolved, name || '', sub, email);
         return reply.code(201).send(list);
       } catch (e) {
         return handleError(reply, e);
@@ -191,6 +198,93 @@ export async function registerMailingListRoutes(app: FastifyInstance) {
       if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
       try {
         await removeMember(resolved, id, memberId);
+        return { ok: true };
+      } catch (e) {
+        return handleError(reply, e);
+      }
+    }
+  );
+
+  app.put(
+    '/api/mailinglists/:id/subscribe-settings',
+    { preHandler: (req, reply) => app.authenticate(req, reply) },
+    async (req, reply) => {
+      const id = parseIntParam((req.params as any).id);
+      const body = (req.body as any) || {};
+      const { appId, enabled, slug, notifyCreatorOnJoin, creatorEmail } = body;
+      if (!id) return reply.badRequest('Invalid list id');
+      if (!appId) return reply.badRequest('appId is required');
+      const resolved = await resolveAppId(appId);
+      if (!resolved) return reply.badRequest('App not found');
+      if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
+      try {
+        return await updateSubscribeSettings(resolved, id, {
+          enabled,
+          slug,
+          notifyCreatorOnJoin,
+          creatorEmail
+        });
+      } catch (e) {
+        return handleError(reply, e);
+      }
+    }
+  );
+
+  app.get(
+    '/api/mailinglists/:id/templates/:kind',
+    { preHandler: (req, reply) => app.authenticate(req, reply) },
+    async (req, reply) => {
+      const id = parseIntParam((req.params as any).id);
+      const kind = String((req.params as any).kind || '');
+      const { appId } = (req.query as any) || {};
+      if (!id) return reply.badRequest('Invalid list id');
+      if (!appId) return reply.badRequest('appId is required');
+      const resolved = await resolveAppId(appId);
+      if (!resolved) return reply.badRequest('App not found');
+      if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
+      try {
+        return await getSubscribeTemplate(resolved, id, kind);
+      } catch (e) {
+        return handleError(reply, e);
+      }
+    }
+  );
+
+  app.put(
+    '/api/mailinglists/:id/templates/:kind',
+    { preHandler: (req, reply) => app.authenticate(req, reply) },
+    async (req, reply) => {
+      const id = parseIntParam((req.params as any).id);
+      const kind = String((req.params as any).kind || '');
+      const body = (req.body as any) || {};
+      const { appId, subject, content } = body;
+      if (!id) return reply.badRequest('Invalid list id');
+      if (!appId) return reply.badRequest('appId is required');
+      const resolved = await resolveAppId(appId);
+      if (!resolved) return reply.badRequest('App not found');
+      if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
+      try {
+        return await upsertSubscribeTemplate(resolved, id, kind, { subject, content });
+      } catch (e) {
+        return handleError(reply, e);
+      }
+    }
+  );
+
+  app.delete(
+    '/api/mailinglists/:id/templates/:kind',
+    { preHandler: (req, reply) => app.authenticate(req, reply) },
+    async (req, reply) => {
+      const id = parseIntParam((req.params as any).id);
+      const kind = String((req.params as any).kind || '');
+      const { appId } = (req.body as any) || (req.query as any) || {};
+      if (!id) return reply.badRequest('Invalid list id');
+      if (!appId) return reply.badRequest('appId is required');
+      const resolved = await resolveAppId(appId);
+      if (!resolved) return reply.badRequest('App not found');
+      if (!(await userCanAccessApp(req, resolved))) return reply.forbidden();
+      try {
+        await deleteSubscribeTemplate(resolved, id, kind);
         return { ok: true };
       } catch (e) {
         return handleError(reply, e);
