@@ -27,7 +27,7 @@ jwks.json
 keys/jwks.json
 
 # Logs
-logs/
+/logs/
 *.log
 
 # OS
