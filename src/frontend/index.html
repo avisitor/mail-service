@@ -981,6 +981,34 @@
     </div>
   </div>
   
+  <!-- Subscription Template Modal -->
+  <div id="subscribeTemplateModalBackdrop" class="subscribe-template-modal-backdrop" style="display: none;"></div>
+  <div id="subscribeTemplateModal" class="subscribe-template-modal" role="dialog" aria-modal="true" aria-labelledby="subscribeTemplateModalTitle" style="display: none;">
+    <div class="subscribe-template-modal-dialog">
+      <div class="subscribe-template-modal-header">
+        <h4 id="subscribeTemplateModalTitle">Edit Template</h4>
+        <button type="button" class="btn-close" id="subscribeTemplateModalClose" aria-label="Close"></button>
+      </div>
+      <div class="subscribe-template-modal-body">
+        <div id="subscribeTemplateStatus" class="mb-2"></div>
+        <div class="form-group mb-3" id="subscribeTemplateSubjectGroup">
+          <label for="subscribeTemplateSubject">Subject</label>
+          <input type="text" id="subscribeTemplateSubject" class="form-control">
+        </div>
+        <div class="form-group mb-2">
+          <label for="subscribeTemplateContent">Content</label>
+          <textarea id="subscribeTemplateContent"></textarea>
+        </div>
+        <div class="text-muted small mb-3" id="subscribeTemplateHint"></div>
+      </div>
+      <div class="subscribe-template-modal-footer">
+        <button type="button" class="btn btn-outline-danger me-auto" id="subscribeTemplateResetBtn">Reset to default</button>
+        <button type="button" class="btn btn-secondary" id="subscribeTemplateCancelBtn">Cancel</button>
+        <button type="button" class="btn btn-primary" id="subscribeTemplateSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+  
   <!-- Bootstrap JavaScript -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <!-- Use compiled JS under /ui/ (dist build places main.js there). -->

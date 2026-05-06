@@ -1251,3 +1251,91 @@ textarea:disabled {
     width: 1%;
 }
 
+/* Subscription Page Settings */
+.subscribe-settings-panel {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.subscribe-settings-panel h4 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 1.1rem;
+    color: inherit;
+}
+
+.subscribe-settings-row {
+    margin-bottom: 16px;
+}
+
+.subscribe-template-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.subscribe-template-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Subscription Template Modal */
+.subscribe-template-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 1050;
+}
+
+.subscribe-template-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1055;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.subscribe-template-modal-dialog {
+    background: #ffffff;
+    color: #222;
+    width: 100%;
+    max-width: 900px;
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.subscribe-template-modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subscribe-template-modal-header h4 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.subscribe-template-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.subscribe-template-modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+

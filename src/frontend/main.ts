@@ -3718,6 +3718,315 @@ class MailingListsView implements IView {
       tbody.appendChild(tr);
     });
     detail.appendChild(table);
+
+    this.renderSubscribePanel(list);
+  }
+
+  private async renderSubscribePanel(list: any): Promise<void> {
+    const detail = document.getElementById('mailingListsDetailPanel');
+    if (!detail) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'subscribe-settings-panel';
+    panel.innerHTML = `
+      <h4>Subscription Page</h4>
+      <div class="subscribe-settings-row">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="subscribeEnabled" ${list.subscribePageEnabled ? 'checked' : ''}>
+          <label class="form-check-label" for="subscribeEnabled">Enable public subscription page</label>
+        </div>
+        <div class="form-group mb-2">
+          <label for="subscribeSlug">URL slug</label>
+          <input type="text" id="subscribeSlug" class="form-control" placeholder="e.g. weekly-newsletter" value="${this.escapeAttr(list.subscribeSlug || '')}" ${!list.subscribePageEnabled ? 'disabled' : ''}>
+          <div class="invalid-feedback">Slug must be alphanumeric with hyphens, e.g. "my-list"</div>
+        </div>
+        <div id="subscribeUrlPreview" class="mb-3 small" style="display: ${list.subscribePageEnabled && list.subscribeSlug ? 'block' : 'none'}">
+          Public URL: <a href="${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(list.subscribeSlug || '')}" target="_blank">${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(list.subscribeSlug || '')}</a>
+        </div>
+      </div>
+      <div class="subscribe-settings-row">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="subscribeNotifyCreator" ${list.notifyCreatorOnJoin ? 'checked' : ''}>
+          <label class="form-check-label" for="subscribeNotifyCreator">Email the list creator when someone confirms</label>
+        </div>
+        <div class="form-group mb-3" id="subscribeCreatorEmailGroup" style="display: ${list.notifyCreatorOnJoin ? 'block' : 'none'}">
+          <label for="subscribeCreatorEmail">Creator email</label>
+          <input type="email" id="subscribeCreatorEmail" class="form-control" value="${this.escapeAttr(list.creatorEmail || '')}">
+        </div>
+      </div>
+      <div class="mb-3">
+        <button type="button" id="saveSubscribeSettingsBtn" class="btn btn-primary" disabled>Save settings</button>
+        <span id="subscribeSettingsStatus" class="ms-2"></span>
+      </div>
+      <div class="subscribe-template-buttons">
+        <div class="subscribe-template-btn-group">
+          <button type="button" class="btn btn-sm btn-outline-secondary edit-template-btn" data-kind="SUBSCRIBE_PAGE">Subscription page</button>
+          <span class="badge bg-info custom-badge" data-kind="SUBSCRIBE_PAGE" style="display: none;">(custom)</span>
+          <button type="button" class="btn btn-sm btn-link text-danger reset-template-btn" data-kind="SUBSCRIBE_PAGE" style="display: none;">Reset</button>
+        </div>
+        <div class="subscribe-template-btn-group">
+          <button type="button" class="btn btn-sm btn-outline-secondary edit-template-btn" data-kind="CONFIRM_EMAIL">Confirmation email</button>
+          <span class="badge bg-info custom-badge" data-kind="CONFIRM_EMAIL" style="display: none;">(custom)</span>
+          <button type="button" class="btn btn-sm btn-link text-danger reset-template-btn" data-kind="CONFIRM_EMAIL" style="display: none;">Reset</button>
+        </div>
+        <div class="subscribe-template-btn-group">
+          <button type="button" class="btn btn-sm btn-outline-secondary edit-template-btn" data-kind="WELCOME_EMAIL">Welcome email</button>
+          <span class="badge bg-info custom-badge" data-kind="WELCOME_EMAIL" style="display: none;">(custom)</span>
+          <button type="button" class="btn btn-sm btn-link text-danger reset-template-btn" data-kind="WELCOME_EMAIL" style="display: none;">Reset</button>
+        </div>
+        <div class="subscribe-template-btn-group">
+          <button type="button" class="btn btn-sm btn-outline-secondary edit-template-btn" data-kind="CREATOR_NOTICE">Creator notice email</button>
+          <span class="badge bg-info custom-badge" data-kind="CREATOR_NOTICE" style="display: none;">(custom)</span>
+          <button type="button" class="btn btn-sm btn-link text-danger reset-template-btn" data-kind="CREATOR_NOTICE" style="display: none;">Reset</button>
+        </div>
+      </div>
+    `;
+    detail.appendChild(panel);
+
+    const enabledEl = panel.querySelector('#subscribeEnabled') as HTMLInputElement;
+    const slugEl = panel.querySelector('#subscribeSlug') as HTMLInputElement;
+    const previewEl = panel.querySelector('#subscribeUrlPreview') as HTMLDivElement;
+    const notifyEl = panel.querySelector('#subscribeNotifyCreator') as HTMLInputElement;
+    const creatorEmailGroupEl = panel.querySelector('#subscribeCreatorEmailGroup') as HTMLDivElement;
+    const creatorEmailEl = panel.querySelector('#subscribeCreatorEmail') as HTMLInputElement;
+    const saveBtn = panel.querySelector('#saveSubscribeSettingsBtn') as HTMLButtonElement;
+    const statusEl = panel.querySelector('#subscribeSettingsStatus') as HTMLSpanElement;
+
+    const checkChanges = () => {
+      const slugValid = !slugEl.value || /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(slugEl.value);
+      if (!slugValid) {
+        slugEl.classList.add('is-invalid');
+        saveBtn.disabled = true;
+      } else {
+        slugEl.classList.remove('is-invalid');
+        const changed = enabledEl.checked !== !!list.subscribePageEnabled ||
+                        slugEl.value !== (list.subscribeSlug || '') ||
+                        notifyEl.checked !== !!list.notifyCreatorOnJoin ||
+                        creatorEmailEl.value !== (list.creatorEmail || '');
+        saveBtn.disabled = !changed;
+      }
+    };
+
+    enabledEl.addEventListener('change', () => {
+      slugEl.disabled = !enabledEl.checked;
+      if (enabledEl.checked && slugEl.value) {
+        previewEl.style.display = 'block';
+        previewEl.innerHTML = `Public URL: <a href="${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(slugEl.value)}" target="_blank">${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(slugEl.value)}</a>`;
+      } else {
+        previewEl.style.display = 'none';
+      }
+      checkChanges();
+    });
+
+    slugEl.addEventListener('input', () => {
+      if (enabledEl.checked && slugEl.value) {
+        previewEl.style.display = 'block';
+        previewEl.innerHTML = `Public URL: <a href="${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(slugEl.value)}" target="_blank">${window.location.origin}/subscribe/${this.currentAppId}/${this.escapeAttr(slugEl.value)}</a>`;
+      } else {
+        previewEl.style.display = 'none';
+      }
+      checkChanges();
+    });
+
+    notifyEl.addEventListener('change', () => {
+      creatorEmailGroupEl.style.display = notifyEl.checked ? 'block' : 'none';
+      checkChanges();
+    });
+
+    creatorEmailEl.addEventListener('input', checkChanges);
+
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      statusEl.textContent = 'Saving...';
+      statusEl.style.color = '#888';
+      try {
+        await api(`/api/mailinglists/${list.id}/subscribe-settings`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            appId: this.currentAppId,
+            enabled: enabledEl.checked,
+            slug: slugEl.value || null,
+            notifyCreatorOnJoin: notifyEl.checked,
+            creatorEmail: creatorEmailEl.value || null
+          })
+        });
+        statusEl.textContent = 'Saved';
+        statusEl.style.color = '#81c784';
+        setTimeout(() => { if (statusEl.textContent === 'Saved') statusEl.textContent = ''; }, 3000);
+        await this.loadListDetail(list.id, { soft: true });
+      } catch (e: any) {
+        statusEl.textContent = `Error: ${e.message}`;
+        statusEl.style.color = '#ff6b6b';
+        saveBtn.disabled = false;
+      }
+    });
+
+    const kinds = ['SUBSCRIBE_PAGE', 'CONFIRM_EMAIL', 'WELCOME_EMAIL', 'CREATOR_NOTICE'];
+    try {
+      const results = await Promise.all(kinds.map(kind => 
+        api(`/api/mailinglists/${list.id}/templates/${kind}?appId=${encodeURIComponent(this.currentAppId!)}`)
+      ));
+      
+      results.forEach((res, i) => {
+        const kind = kinds[i];
+        const badge = panel.querySelector(`.custom-badge[data-kind="${kind}"]`) as HTMLElement;
+        const resetBtn = panel.querySelector(`.reset-template-btn[data-kind="${kind}"]`) as HTMLElement;
+        if (!res.isDefault) {
+          badge.style.display = 'inline-block';
+          resetBtn.style.display = 'inline-block';
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to load template statuses', e);
+    }
+
+    panel.querySelectorAll('.edit-template-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const kind = (btn as HTMLElement).dataset.kind!;
+        this.openSubscribeTemplateEditor(list, kind);
+      });
+    });
+
+    panel.querySelectorAll('.reset-template-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const kind = (btn as HTMLElement).dataset.kind!;
+        this.resetSubscribeTemplate(list, kind);
+      });
+    });
+  }
+
+  private async openSubscribeTemplateEditor(list: any, kind: string): Promise<void> {
+    const modal = document.getElementById('subscribeTemplateModal');
+    const backdrop = document.getElementById('subscribeTemplateModalBackdrop');
+    if (!modal || !backdrop) return;
+
+    const titleEl = document.getElementById('subscribeTemplateModalTitle');
+    const subjectGroup = document.getElementById('subscribeTemplateSubjectGroup');
+    const subjectEl = document.getElementById('subscribeTemplateSubject') as HTMLInputElement;
+    const hintEl = document.getElementById('subscribeTemplateHint');
+    const statusEl = document.getElementById('subscribeTemplateStatus');
+    const saveBtn = document.getElementById('subscribeTemplateSaveBtn') as HTMLButtonElement;
+    const resetBtn = document.getElementById('subscribeTemplateResetBtn') as HTMLButtonElement;
+    const cancelBtn = document.getElementById('subscribeTemplateCancelBtn');
+    const closeBtn = document.getElementById('subscribeTemplateModalClose');
+
+    if (statusEl) statusEl.textContent = '';
+
+    let title = 'Edit Template';
+    let hint = '';
+    if (kind === 'SUBSCRIBE_PAGE') {
+      title = 'Edit subscription page HTML';
+      hint = 'Variables: {{listName}}, {{appName}}, {{submitUrl}} (must include a &lt;form action="{{submitUrl}}" method="post"&gt; with email and optional name inputs)';
+      if (subjectGroup) subjectGroup.style.display = 'none';
+    } else {
+      if (subjectGroup) subjectGroup.style.display = 'block';
+      if (kind === 'CONFIRM_EMAIL') {
+        title = 'Edit confirmation email';
+        hint = 'Variables: {{listName}}, {{memberName}}, {{memberEmail}}, {{confirmUrl}}';
+      } else if (kind === 'WELCOME_EMAIL') {
+        title = 'Edit welcome email';
+        hint = 'Variables: {{listName}}, {{memberName}}, {{memberEmail}}, {{unsubscribeUrl}}';
+      } else if (kind === 'CREATOR_NOTICE') {
+        title = 'Edit creator notice email';
+        hint = 'Variables: {{listName}}, {{memberName}}, {{memberEmail}}';
+      }
+    }
+
+    if (titleEl) titleEl.textContent = title;
+    if (hintEl) hintEl.innerHTML = hint;
+
+    try {
+      const res = await api(`/api/mailinglists/${list.id}/templates/${kind}?appId=${encodeURIComponent(this.currentAppId!)}`);
+      if (subjectEl) subjectEl.value = res.subject || '';
+      
+      if (!TinyMCEManager.isReady('#subscribeTemplateContent')) {
+        await TinyMCEManager.initialize('#subscribeTemplateContent', { height: 400 });
+      }
+      TinyMCEManager.setContent('#subscribeTemplateContent', res.content || '', false);
+      
+      if (resetBtn) resetBtn.style.display = res.isDefault ? 'none' : 'inline-block';
+    } catch (e: any) {
+      if (statusEl) {
+        statusEl.textContent = `Error loading template: ${e.message}`;
+        statusEl.className = 'text-danger mb-2';
+      }
+    }
+
+    modal.style.display = 'flex';
+    backdrop.style.display = 'block';
+
+    const closeModal = () => {
+      modal.style.display = 'none';
+      backdrop.style.display = 'none';
+    };
+
+    const handleSave = async () => {
+      saveBtn.disabled = true;
+      if (statusEl) {
+        statusEl.textContent = 'Saving...';
+        statusEl.className = 'text-muted mb-2';
+      }
+      try {
+        const content = TinyMCEManager.getContent('#subscribeTemplateContent');
+        await api(`/api/mailinglists/${list.id}/templates/${kind}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            appId: this.currentAppId,
+            subject: kind === 'SUBSCRIBE_PAGE' ? '' : subjectEl.value,
+            content
+          })
+        });
+        closeModal();
+        await this.loadListDetail(list.id, { soft: true });
+      } catch (e: any) {
+        if (statusEl) {
+          statusEl.textContent = `Error saving: ${e.message}`;
+          statusEl.className = 'text-danger mb-2';
+        }
+        saveBtn.disabled = false;
+      }
+    };
+
+    const handleReset = async () => {
+      if (!confirm('Reset this template to the default?')) return;
+      await this.resetSubscribeTemplate(list, kind);
+      closeModal();
+    };
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeModal();
+    };
+
+    const newSaveBtn = saveBtn.cloneNode(true) as HTMLButtonElement;
+    saveBtn.parentNode?.replaceChild(newSaveBtn, saveBtn);
+    newSaveBtn.addEventListener('click', handleSave);
+
+    const newResetBtn = resetBtn.cloneNode(true) as HTMLButtonElement;
+    resetBtn.parentNode?.replaceChild(newResetBtn, resetBtn);
+    newResetBtn.addEventListener('click', handleReset);
+
+    const newCancelBtn = cancelBtn?.cloneNode(true) as HTMLButtonElement;
+    cancelBtn?.parentNode?.replaceChild(newCancelBtn, cancelBtn);
+    newCancelBtn.addEventListener('click', closeModal);
+
+    const newCloseBtn = closeBtn?.cloneNode(true) as HTMLButtonElement;
+    closeBtn?.parentNode?.replaceChild(newCloseBtn, closeBtn);
+    newCloseBtn.addEventListener('click', closeModal);
+
+    backdrop.onclick = closeModal;
+    document.addEventListener('keydown', handleKeydown, { once: true });
+  }
+
+  private async resetSubscribeTemplate(list: any, kind: string): Promise<void> {
+    if (!confirm('Reset this template to the default?')) return;
+    try {
+      await api(`/api/mailinglists/${list.id}/templates/${kind}?appId=${encodeURIComponent(this.currentAppId!)}`, {
+        method: 'DELETE'
+      });
+      await this.loadListDetail(list.id, { soft: true });
+    } catch (e: any) {
+      alert(`Error resetting template: ${e.message}`);
+    }
   }
 
   private escapeAttr(s: string): string {
