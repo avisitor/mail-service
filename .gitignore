@@ -47,3 +47,5 @@ fix-rolesanywhere-permissions.sh
 
 # Git worktrees
 .worktrees/
+.sisyphus
+nohup.out
