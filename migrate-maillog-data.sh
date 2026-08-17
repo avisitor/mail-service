@@ -5,8 +5,8 @@
 # to the central mailservice database for unified log viewing.
 
 # Database connection settings
-DB_USER="laana"
-DB_PASS="0\$o7Z&93"
+DB_USER="${db_username:-laana}"
+DB_PASS="${db_password:-}"
 DB_HOST="localhost"
 
 # Configuration
