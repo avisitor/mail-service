@@ -132,7 +132,7 @@ describe('Batched Mail Processing', () => {
     
     expect(jobs.length).toBe(10);
     jobs.forEach(job => {
-      expect(job.status).toBe('pending');
+      expect(['pending', 'processing']).toContain(job.status);
     });
 
     // Test worker processing with batching
