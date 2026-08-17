@@ -69,9 +69,15 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
 
     console.log(`[Worker] Found ${jobs.length} jobs, will process up to ${maxJobsToProcess} due to rate limits.`);
 
+    // Cap the job set to what the rate limits allow this tick. The per-batch
+    // check below is only a secondary guard: a single batch can be larger than
+    // the hourly/daily limit, so without this cap an oversized batch would slip
+    // through and exceed the quota entirely.
+    const jobsToProcess = jobs.slice(0, maxJobsToProcess);
+
     // Process jobs in batches with configurable delays
-    for (let i = 0; i < jobs.length; i += batchConfig.batchSize) {
-      const batch = jobs.slice(i, i + batchConfig.batchSize);
+    for (let i = 0; i < jobsToProcess.length; i += batchConfig.batchSize) {
+      const batch = jobsToProcess.slice(i, i + batchConfig.batchSize);
       
       // Check rate limits before each batch
       const hourlyAllowed = globalRateTracker.checkHourlyLimit(batchConfig.maxEmailsPerHour);
@@ -80,7 +86,7 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
       
       if (!hourlyAllowed || !dailyAllowed) {
         console.log(`[Worker] Rate limit reached after processing ${i} jobs`);
-        result.jobsRateLimited = jobs.length - i;
+        result.jobsRateLimited = jobsToProcess.length - i;
         break;
       }
       
@@ -107,10 +113,16 @@ export async function workerTick(limitJobs?: number): Promise<WorkerResult> {
       });
 
       // Inter-batch delay (for anti-spam batching)
-      if (batchConfig.interBatchDelayMs > 0 && i + batchConfig.batchSize < jobs.length) {
+      if (batchConfig.interBatchDelayMs > 0 && i + batchConfig.batchSize < jobsToProcess.length) {
         console.log(`[Worker] Waiting ${batchConfig.interBatchDelayMs}ms before next batch...`);
         await sleep(batchConfig.interBatchDelayMs);
       }
+    }
+
+    // Any jobs left unprocessed because of rate limits count as rate limited
+    const unprocessed = jobs.length - result.jobsProcessed;
+    if (unprocessed > 0 && (batchConfig.maxEmailsPerHour || batchConfig.maxEmailsPerDay)) {
+      result.jobsRateLimited += unprocessed;
     }
 
     console.log(`[Worker] Completed tick: ${result.jobsProcessed} processed, ${result.jobsSent} sent, ${result.jobsFailed} failed, ${result.jobsRateLimited} rate limited`);
