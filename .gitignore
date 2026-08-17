@@ -49,3 +49,4 @@ fix-rolesanywhere-permissions.sh
 .worktrees/
 .sisyphus
 nohup.out
+tests/reports
