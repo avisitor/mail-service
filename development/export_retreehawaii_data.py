@@ -4,6 +4,7 @@ Export templates and maillog data from retreehawaii MySQL database to JSON files
 for import into the mail-service Prisma database.
 """
 
+import os
 import mysql.connector
 import json
 import sys
@@ -11,10 +12,10 @@ from datetime import datetime
 
 # Database connection config
 DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'laana',
-    'password': '0$o7Z&93',
-    'database': 'retreehawaii',
+    'host': os.getenv('db_host', 'localhost'),
+    'user': os.getenv('db_username', 'laana'),
+    'password': os.getenv('db_password', ''),
+    'database': os.getenv('db_database', 'retreehawaii'),
     'charset': 'utf8mb4'
 }
 
