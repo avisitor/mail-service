@@ -1,5 +1,5 @@
 import { describe, it, beforeAll, afterAll, beforeEach, expect } from 'vitest';
-process.env.DATABASE_URL = process.env.DATABASE_URL || 'mysql://laana:0$o7Z&93@localhost:3306/mailservice';
+process.env.DATABASE_URL = process.env.DATABASE_URL || `mysql://laana:${process.env.db_password}@localhost:3306/mailservice`;
 process.env.SMTP_DRY_RUN = 'true';
 process.env.AUTH_ISSUER = 'itest-issuer';
 process.env.AUTH_AUDIENCE = 'itest-aud';
