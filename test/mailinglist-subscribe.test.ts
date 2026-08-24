@@ -59,14 +59,15 @@ describe('mailing list subscription pages (db)', () => {
     });
     expect(bad.statusCode).toBe(400);
 
+    const slug = `my-test-slug-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const ok = await app.inject({
       method: 'PUT',
       url: `/api/mailinglists/${list.id}/subscribe-settings`,
-      payload: { appId: TEST_APP_ID, slug: 'my-test-slug', enabled: true }
+      payload: { appId: TEST_APP_ID, slug, enabled: true }
     });
     expect(ok.statusCode).toBe(200);
     const body = JSON.parse(ok.payload);
-    expect(body.subscribeSlug).toBe('my-test-slug');
+    expect(body.subscribeSlug).toBe(slug);
     expect(body.subscribePageEnabled).toBe(true);
   });
 
