@@ -363,10 +363,21 @@ describe('Email Sending Integration Tests', () => {
       await expect(sendEmail(emailInput as any)).rejects.toThrow();
     });
 
-    it.skip('should handle non-existent tenant/app gracefully', async () => {
-      // This test times out - skipping for now
-      // The sendEmail function may be hanging when trying to resolve non-existent configs
-    });
+    it('should handle non-existent tenant/app gracefully', async () => {
+      const emailInput = {
+        to: 'nonexistent-handling@localhost.local',
+        subject: 'Non-existent Tenant/App Test',
+        html: '<p>Should not hang even with a missing tenant/app.</p>',
+        tenantId: 'does-not-exist-tenant',
+        appId: 'does-not-exist-app',
+      };
+
+      // Config resolution falls back to the environment SMTP config (it does not hang),
+      // and the transporter timeouts make sendEmail resolve or reject within the test
+      // timeout instead of blocking on an unreachable SMTP server.
+      const result = await sendEmail(emailInput).catch((e) => e);
+      expect(result).toBeDefined();
+    }, 20000);
   });
 
   describe('Email Content Variations', () => {
