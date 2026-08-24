@@ -14,6 +14,12 @@ let cachedConfig: any = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+// Bound every SMTP connection so a missing/unreachable server fails fast
+// instead of blocking the send up to Nodemailer's 2-minute default.
+const SMTP_TIMEOUT_MS = 10000;
+// Bound the Roles Anywhere credential helper so a hung binary cannot block forever.
+const ROLES_ANYWHERE_TIMEOUT_MS = 20000;
+
 const PROJECT_DIR = process.env.MAIL_SERVICE_DIR || process.cwd();
 const ROLES_ANYWHERE_DIR = path.join(PROJECT_DIR, '.rolesanywhere');
 const ROLES_ANYWHERE_BIN_DIR = path.join(ROLES_ANYWHERE_DIR, 'bin');
@@ -34,7 +40,7 @@ type RolesAnywhereCredentials = {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken: string;
-  expiration: string;
+  expiration: Date;
 };
 
 let cachedRolesAnywhereCreds: RolesAnywhereCredentials | null = null;
@@ -93,14 +99,14 @@ async function getRolesAnywhereCredentials(): Promise<RolesAnywhereCredentials> 
     '--trust-anchor-arn', ROLES_ANYWHERE_TRUST_ANCHOR_ARN,
     '--profile-arn', ROLES_ANYWHERE_PROFILE_ARN,
     '--role-arn', ROLES_ANYWHERE_ROLE_ARN,
-  ]);
+  ], { timeout: ROLES_ANYWHERE_TIMEOUT_MS });
 
   const parsed = JSON.parse(stdout.toString());
   const creds: RolesAnywhereCredentials = {
     accessKeyId: parsed.AccessKeyId,
     secretAccessKey: parsed.SecretAccessKey,
     sessionToken: parsed.SessionToken,
-    expiration: parsed.Expiration,
+    expiration: new Date(parsed.Expiration),
   };
 
   if (!creds.accessKeyId || !creds.secretAccessKey || !creds.sessionToken || !creds.expiration) {
@@ -108,7 +114,7 @@ async function getRolesAnywhereCredentials(): Promise<RolesAnywhereCredentials> 
   }
 
   cachedRolesAnywhereCreds = creds;
-  cachedRolesAnywhereExpiry = Date.parse(creds.expiration) || 0;
+  cachedRolesAnywhereExpiry = creds.expiration.getTime() || 0;
   return creds;
 }
 
@@ -127,6 +133,9 @@ export function getTransporter(tenantId?: string, appId?: string): Transporter {
         port: config.smtp.port,
         secure: config.smtp.secure,
         auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
+        connectionTimeout: SMTP_TIMEOUT_MS,
+        socketTimeout: SMTP_TIMEOUT_MS,
+        greetingTimeout: SMTP_TIMEOUT_MS,
       });
     }
     return transporter;
@@ -152,18 +161,18 @@ async function getTransporterAsync(tenantId?: string, appId?: string): Promise<T
   
   // Create new transporter with resolved config based on service type
   if (smtpConfig.service === 'ses') {
-    // For SES, we'll use a custom transport that leverages AWS SDK
-    // This is a simplified approach - in production you might want a more robust implementation
+    // For SES, we'll use a custom transport that leverages AWS SDK.
+    // Prefer the stored IAM user credentials; fall back to IAM Roles Anywhere
+    // (the aws_signing_helper binary) only when no static keys are configured.
+    const sesCredentials = smtpConfig.awsAccessKey && smtpConfig.awsSecretKey
+      ? {
+          accessKeyId: smtpConfig.awsAccessKey,
+          secretAccessKey: smtpConfig.awsSecretKey,
+        }
+      : await getRolesAnywhereCredentials();
     const sesClient = new SESClient({
       region: smtpConfig.awsRegion || 'us-east-1',
-      credentials: async () => {
-        const creds = await getRolesAnywhereCredentials();
-        return {
-          accessKeyId: creds.accessKeyId,
-          secretAccessKey: creds.secretAccessKey,
-          sessionToken: creds.sessionToken,
-        };
-      },
+      credentials: sesCredentials,
     });
     
     // Create a custom transport that uses SES SDK
@@ -205,6 +214,9 @@ async function getTransporterAsync(tenantId?: string, appId?: string): Promise<T
         user: smtpConfig.user, 
         pass: smtpConfig.pass 
       } : undefined,
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
     });
   }
 
@@ -296,6 +308,9 @@ export async function sendEmail(input: SendEmailInput) {
         user: config.testSmtp.user,
         pass: config.testSmtp.pass
       } : undefined,
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
     });
     
     fromAddr = config.testSmtp.enabled ? config.testSmtp.fromDefault : 'test@example.com';
