@@ -1170,6 +1170,67 @@ npm test tests/sms-*.test.ts      # SMS tests only
 
 **Note**: E2E tests use Puppeteer which will automatically download Chromium if not found. The first test run may take longer as it downloads the browser.
 
+### SES Integration Tests
+
+The `tests/email-integration.test.ts` suite includes an `SES Email Sending (AWS Simulator)` block that sends real email through AWS SES to the `success@`/`bounce@simulator.amazonses.com` mailboxes. These tests run only when the following are present in `.env.test`:
+
+```bash
+AWS_SES_ENABLED=true
+AWS_SES_ACCESS_KEY=<access-key-for-the-test-account>
+AWS_SES_SECRET_KEY=<secret-key-for-the-test-account>
+AWS_SES_REGION=us-east-2               # must match the region where the identity is verified
+AWS_SES_FROM_EMAIL=test@worldspot.com  # the verified SES sender identity
+```
+
+If `AWS_SES_ENABLED`, `AWS_SES_ACCESS_KEY`, or `AWS_SES_SECRET_KEY` is missing, the SES tests are **skipped** (not failed).
+
+#### Verifying the sender identity (the critical step)
+
+SES identities are scoped to a specific **AWS account** *and* **region**. The test sends mail using the credentials in `AWS_SES_ACCESS_KEY`/`AWS_SES_SECRET_KEY` — **not** the AWS CLI default profile. The most common failure is verifying the identity against the wrong account:
+
+> `aws sesv2 create-email-identity ...` / `get-email-identity` run with the CLI's default credentials (`aws configure` / `AWS_ACCESS_KEY_ID`) verify a *different* account than the one the test sends from. An `AlreadyExistsException` or `VerificationStatus: SUCCESS` from that command does **not** mean the test's account is verified.
+
+To verify against the account the tests actually use, point the CLI at the test credentials explicitly:
+
+```bash
+# Use the SAME credentials the test uses
+export AWS_ACCESS_KEY_ID="$AWS_SES_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$AWS_SES_SECRET_KEY"
+unset AWS_SES_ACCESS_KEY AWS_SES_SECRET_KEY
+
+# Region must match AWS_SES_REGION exactly
+aws sesv2 create-email-identity \
+  --email-identity "$AWS_SES_FROM_EMAIL" \
+  --region "$AWS_SES_REGION"
+
+# Confirm it is verified in THAT account + region
+aws sesv2 get-email-identity \
+  --email-identity "$AWS_SES_FROM_EMAIL" \
+  --region "$AWS_SES_REGION" \
+  | grep -E "VerificationStatus|VerifiedForSendingStatus"
+# Expect: VerificationStatus: SUCCESS  and  VerifiedForSendingStatus: true
+```
+
+- `create-email-identity` starts verification and emails a link to the `FROM` address. **The identity is not usable until that link is clicked** (`VerificationStatus` becomes `SUCCESS`). Until then the test fails with `MessageRejected: Email address is not verified`.
+- If you cannot reach the `FROM` mailbox, prefer verifying the whole **domain** (`--email-identity worldspot.com`, DNS-based) — this covers every `@worldspot.com` sender with no per-address inbox click.
+
+#### Validating before a full run
+
+Run `./run-tests.sh --diagnose`. A `MessageRejected: Email address is not verified` means the sender identity is still absent/unverified in the **test account + region**, not a code bug. You can confirm which account the test keys resolve to with:
+
+```bash
+AWS_ACCESS_KEY_ID="$AWS_SES_ACCESS_KEY" \
+AWS_SECRET_ACCESS_KEY="$AWS_SES_SECRET_KEY" \
+aws sts get-caller-identity --region "$AWS_SES_REGION"
+```
+
+That `Account` is the one that must contain the verified `AWS_SES_FROM_EMAIL` identity in `AWS_SES_REGION`.
+
+#### Notes
+
+- The `simulator.amazonses.com` recipients do **not** require recipient verification (that is their purpose), even in SES sandbox mode. Only the **sender** (`AWS_SES_FROM_EMAIL`) must be a verified identity in the sending account + region.
+- Region must be consistent end-to-end: `AWS_SES_REGION` (stored on the SMTP config and used by `new SESClient({ region })` in `src/providers/smtp.ts`) must equal the region where the identity was verified.
+
 ## Environment Variables
 
 See `.env.example` for all available configuration options. Key variables include:
