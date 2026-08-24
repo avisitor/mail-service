@@ -50,3 +50,5 @@ fix-rolesanywhere-permissions.sh
 .sisyphus
 nohup.out
 tests/reports
+.omo
+.opencode
