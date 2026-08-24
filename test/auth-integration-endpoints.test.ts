@@ -33,7 +33,7 @@ describe('Secure App Authentication Integration', () => {
       data: {
         tenantId: testTenantId,
         name: 'Integration Test App',
-        clientId: 'integration-test-client',
+        clientId: `integration-test-client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         clientSecret: testClientSecretHash
       }
     });
