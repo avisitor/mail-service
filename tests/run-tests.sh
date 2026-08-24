@@ -10,6 +10,7 @@
 #   ./run-tests.sh -v              # real-time verbose output
 #   ./run-tests.sh --diagnose      # if failures/skipped, evaluate report via opencode
 #   ./run-tests.sh --summary-only  # suppress console summary (JSON only)
+#   --cleanup[=N]       Remove report files older than N days (default 7) on completion
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -19,6 +20,7 @@ VERBOSE=0
 DIAGNOSE=0
 SUMMARY_ONLY=0
 FRAMEWORK=""
+CLEANUP_DAYS=""
 
 # --- Parse options ---
 while [[ $# -gt 0 ]]; do
@@ -26,12 +28,45 @@ while [[ $# -gt 0 ]]; do
     -v|--verbose) VERBOSE=1; shift;;
     --diagnose)  DIAGNOSE=1; shift;;
     --summary-only) SUMMARY_ONLY=1; shift;;
+    --cleanup)
+      CLEANUP_DAYS=7
+      if [[ $# -gt 1 && "$2" =~ ^[0-9]+$ ]]; then
+        CLEANUP_DAYS="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --cleanup=*)
+      CLEANUP_DAYS="${1#*=}"
+      if [[ ! "$CLEANUP_DAYS" =~ ^[0-9]+$ ]]; then
+        echo "Error: --cleanup requires a non-negative integer (got '$CLEANUP_DAYS')" >&2
+        exit 2
+      fi
+      shift
+      ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
       exit 0;;
     *) shift;;
   esac
 done
+
+# ─── Prune old report files (--cleanup) ────────────────────────────────────
+# If --cleanup was supplied, delete report files (xml/json/txt/html) in the
+# reports directory older than CLEANUP_DAYS (default 7) once the run finishes.
+# Gated on CLEANUP_DAYS being set; never fails the script.
+cleanup_old_reports() {
+  [[ -z "${CLEANUP_DAYS:-}" ]] && return 0
+  [[ "$CLEANUP_DAYS" =~ ^[0-9]+$ ]] || return 0
+  [[ -d "$REPORTS_DIR" ]] || return 0
+  echo "🧹 Removing report files older than $CLEANUP_DAYS day(s) from $REPORTS_DIR"
+  find "$REPORTS_DIR" -maxdepth 1 -type f \
+    \( -name '*.xml' -o -name '*.json' -o -name '*.txt' -o -name '*.html' \) \
+    ! -name 'latest.json' \
+    -mtime +"$CLEANUP_DAYS" -delete 2>/dev/null || true
+}
+trap cleanup_old_reports EXIT
 
 # --- Detect framework + config ---
 PHPUNIT_BIN="$PROJECT_DIR/vendor/bin/phpunit"
@@ -55,7 +90,8 @@ fi
 echo "🌱 $(basename "$PROJECT_DIR") Test Runner ($FRAMEWORK)"
 echo "=========================================="
 
-mkdir -p tests/reports
+REPORTS_DIR="$PROJECT_DIR/tests/reports"
+mkdir -p "$REPORTS_DIR"
 TS=$(date +"%Y%m%d-%H%M%S")
 JSON_REPORT="tests/reports/test-report-$TS.json"
 RAW="tests/reports/raw-$TS"
@@ -210,14 +246,11 @@ echo "📄 JSON report: $JSON_REPORT"
 
 # --- Diagnose (optional) ---
 if [ "$DIAGNOSE" = "1" ]; then
-  if command -v jq >/dev/null 2>&1 && jq -e '(.failures//0)>0 or (.errors//0)>0 or (.skipped//0)>0' "$JSON_REPORT" >/dev/null; then
-    if [ -f "$SCRIPT_DIR/diagnose.sh" ]; then
-      bash "$SCRIPT_DIR/diagnose.sh" "$JSON_REPORT"
-    else
-      echo "⚠️  diagnose.sh not found next to run-tests.sh"
-    fi
+  DIAGNOSE_SH="$(cd "$SCRIPT_DIR" && while [ "$PWD" != "/" ]; do [ -f "diagnose.sh" ] && { echo "$PWD/diagnose.sh"; break; }; cd ..; done)"
+  if [ -n "$DIAGNOSE_SH" ]; then
+    bash "$DIAGNOSE_SH" "$JSON_REPORT"
   else
-    echo "✅ All tests passed with no skips — nothing to diagnose."
+    echo "⚠️  diagnose.sh not found (searched upward from $SCRIPT_DIR)"
   fi
 fi
 
