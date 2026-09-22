@@ -1,0 +1,4 @@
+AWS_ACCESS_KEY_ID="$(grep '^AWS_SES_ACCESS_KEY=' .env.test | cut -d= -f2-)" \
+AWS_SECRET_ACCESS_KEY="$(grep '^AWS_SES_SECRET_KEY=' .env.test | cut -d= -f2-)" \
+aws sesv2 get-email-identity --email-identity worldspot.com \
+  --query '{Status: VerificationStatus, Sending: VerifiedForSendingStatus, DKIM: DkimAttributes.Status}'
