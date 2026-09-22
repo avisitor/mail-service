@@ -1226,6 +1226,18 @@ aws sts get-caller-identity --region "$AWS_SES_REGION"
 
 That `Account` is the one that must contain the verified `AWS_SES_FROM_EMAIL` identity in `AWS_SES_REGION`.
 
+#### Keeping the bounce test out of a human inbox
+
+The `bounce@simulator.amazonses.com` mailbox triggers a real bounce. By default SES **feedback-forwards** the resulting DSN to the verified sender identity (`AWS_SES_FROM_EMAIL`) — i.e. `test@worldspot.com`, a real inbox. To keep that DSN off a human's mailbox, point only the bounce test at a dedicated, non-human sender via `AWS_SES_BOUNCE_FROM_EMAIL` (now in `.env.test`):
+
+```bash
+AWS_SES_BOUNCE_FROM_EMAIL=ses-bounces@worldspot.com
+```
+
+- This address must be a **verified SES identity** in `AWS_SES_REGION`, or covered by a verified `worldspot.com` domain identity, or the send fails with `MessageRejected: Email address is not verified`.
+- The bounce DSN is then feedback-forwarded to that mailbox instead. The test itself only asserts the send does not throw, so it never reads the DSN.
+- Leave `AWS_SES_BOUNCE_FROM_EMAIL` empty to fall back to `AWS_SES_FROM_EMAIL` (previous behavior).
+
 #### Notes
 
 - The `simulator.amazonses.com` recipients do **not** require recipient verification (that is their purpose), even in SES sandbox mode. Only the **sender** (`AWS_SES_FROM_EMAIL`) must be a verified identity in the sending account + region.

@@ -243,11 +243,17 @@ describe('Email Sending Integration Tests', () => {
     });
 
     skipOrTest('should handle SES bounce response correctly', async () => {
+      // Send the bounce simulation from a dedicated, non-human mailbox so the
+      // SES bounce DSN (feedback-forwarded to the verified sender identity)
+      // lands somewhere other than a real person's inbox. Falls back to
+      // AWS_SES_FROM_EMAIL when AWS_SES_BOUNCE_FROM_EMAIL is not set, preserving
+      // the previous behavior.
       const emailInput = {
         to: 'bounce@simulator.amazonses.com',
         subject: 'SES Bounce Test',
         html: '<h1>SES Bounce Test</h1><p>This email should simulate a bounce.</p>',
         text: 'SES Bounce Test: This email should simulate a bounce.',
+        fromAddress: process.env.AWS_SES_BOUNCE_FROM_EMAIL || process.env.AWS_SES_FROM_EMAIL || 'ses-bounces@worldspot.com',
         tenantId: SES_TENANT_ID,
         appId: SES_APP_ID
       };
