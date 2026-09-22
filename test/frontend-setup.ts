@@ -1,5 +1,22 @@
 import { beforeEach, afterEach, vi } from 'vitest';
 
+// Node >= 22 exposes a broken global `localStorage` (undefined unless
+// --localstorage-file is set) that shadows jsdom's working one under vitest.
+// Re-export jsdom's storage as the global.
+{
+  const jsdomWindow = (globalThis as { jsdom?: { window?: unknown } }).jsdom?.window;
+  const jsdomStorage = jsdomWindow
+    ? (jsdomWindow as { localStorage?: Storage }).localStorage
+    : undefined;
+  if (jsdomStorage) {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: jsdomStorage,
+      configurable: true,
+      writable: true
+    });
+  }
+}
+
 // Frontend test setup - DOM utilities and mock setup
 beforeEach(() => {
   // Clean up DOM before each test
