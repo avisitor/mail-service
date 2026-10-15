@@ -260,6 +260,7 @@ async function loadRemoteAppConfig(configUrl: string): Promise<Partial<AppConfig
     const response = await fetch(resolvedUrl, {
       method: 'GET',
       credentials: 'omit',
+      cache: 'no-store',
       headers: { 'Accept': 'application/json' }
     });
 
@@ -324,7 +325,7 @@ async function loadCustomCSS(appId: string): Promise<void> {
     // Create and inject CSS link
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = appConfig.css_url;
+    link.href = appConfig.css_url + (appConfig.css_url.includes('?') ? '&' : '?') + 'v=' + Date.now();
     link.id = 'custom-app-css';
     
     // Add error handling
@@ -466,8 +467,7 @@ async function loadEmbeddedMenu(menuConfig: any, appParams: Record<string, strin
 }
 
 function addBanner(bannerConfig: any): void {
-  // Remove existing banner(s) that match either the legacy default or any id ending with "-banner"
-  const bannersToRemove = document.querySelectorAll('#banner, #app-banner, [id$="-banner"]');
+  const bannersToRemove = document.querySelectorAll('#banner, #app-banner, [id$="-banner"], [data-app-banner]');
   bannersToRemove.forEach(existingBanner => existingBanner.remove());
   
   // Remove existing after-banner content
@@ -480,6 +480,7 @@ function addBanner(bannerConfig: any): void {
   const banner = document.createElement('div');
   banner.id = bannerConfig.id || 'app-banner';
   banner.className = bannerConfig.className || 'app-banner';
+  banner.setAttribute('data-app-banner', 'true');
   banner.innerHTML = bannerConfig.html || '';
   
   // Insert banner at the top of the app
@@ -4635,9 +4636,10 @@ class TinyMCEManager {
       height: options.height || 400,
       menubar: false,
       plugins: 'advlist autolink lists link image charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime media table help wordcount',
-      toolbar: 'undo redo | formatselect | bold italic underline | \
+      toolbar: 'undo redo | blocks | bold italic underline | \
                alignleft aligncenter alignright alignjustify | \
-               bullist numlist outdent indent | removeformat | help',
+               bullist numlist outdent indent | link image table | \
+               charmap insertdatetime media | searchreplace visualblocks code fullscreen preview | removeformat | help',
       content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, sans-serif; font-size: 14px; }',
       setup: (editor: any) => {
         console.log(`[TinyMCEManager] Editor setup complete for: ${editor.id}`);
@@ -10390,9 +10392,10 @@ function initTemplateEditorTinyMCE() {
             height: 400,
             menubar: false,
             plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste code help wordcount',
-            toolbar: 'undo redo | formatselect | bold italic underline | \
+            toolbar: 'undo redo | blocks | bold italic underline | \
                      alignleft aligncenter alignright alignjustify | \
-                     bullist numlist outdent indent | removeformat | help',
+                     bullist numlist outdent indent | link image table | \
+                     charmap insertdatetime media | searchreplace visualblocks code fullscreen preview | removeformat | help',
             content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, sans-serif; font-size: 14px; }'
         });
     }

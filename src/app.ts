@@ -56,12 +56,16 @@ export function buildApp() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tiny.cloud"],
+        // Bootstrap 5 assets are hardcoded in frontend/index.html (cdn.jsdelivr.net).
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tiny.cloud", "https://cdn.jsdelivr.net"],
         scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
-        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tiny.cloud"],
+        // css_url in per-app config can point at any tenant app origin.
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tiny.cloud", "https:"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "https://cdn.tiny.cloud"],
-        fontSrc: ["'self'"],
+        // embeddedMenu.url in per-app config can point at any tenant app origin.
+        connectSrc: ["'self'", "https://cdn.tiny.cloud", "https:"],
+        // TinyMCE skins embed icon fonts as data: URIs.
+        fontSrc: ["'self'", "data:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
         frameSrc: ["'none'"],
