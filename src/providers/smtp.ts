@@ -9,6 +9,19 @@ import { resolveSmtpConfig } from '../modules/smtp/service.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Thrown when an email violates the routing rules (e.g. test recipients on a
+ * production service). This is caller-fixable input, so HTTP routes map it to
+ * 400 instead of 500.
+ */
+export class EmailRoutingError extends Error {
+  readonly statusCode = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmailRoutingError';
+  }
+}
+
 let transporter: Transporter | null = null;
 let cachedConfig: any = null;
 let cacheTimestamp = 0;
@@ -324,15 +337,15 @@ export async function sendEmail(input: SendEmailInput) {
 
     // Routing validation: ensure proper service is used for email types
     if (isSimulatorEmail && smtpConfig.service !== 'ses') {
-      throw new Error(`simulator.amazonses.com emails must be sent through SES service, not ${smtpConfig.service}. Check your SMTP configuration.`);
+      throw new EmailRoutingError(`simulator.amazonses.com emails must be sent through SES service, not ${smtpConfig.service}. Check your SMTP configuration.`);
     }
-    
+
     if (isTestEmail && smtpConfig.service !== 'smtp') {
-      throw new Error(`Test emails (${input.to}) must be sent through SMTP test servers like MailHog, not production services like ${smtpConfig.service}.`);
+      throw new EmailRoutingError(`Test emails (${input.to}) must be sent through SMTP test servers like MailHog, not production services like ${smtpConfig.service}.`);
     }
-    
+
     if (isTestEmail && smtpConfig.host !== 'localhost' && !smtpConfig.host?.includes('mailhog')) {
-      throw new Error(`Test emails (${input.to}) must be sent through localhost/MailHog, not ${smtpConfig.host}.`);
+      throw new EmailRoutingError(`Test emails (${input.to}) must be sent through localhost/MailHog, not ${smtpConfig.host}.`);
     }
     
     fromAddr = smtpConfig.fromAddress || config.smtp.fromDefault || config.smtp.user || '';

@@ -22,7 +22,7 @@ import { registerAppRoutes } from './modules/apps/routes.js';
 import { registerLogRoutes } from './modules/logs/routes.js';
 import { registerMailingListRoutes } from './modules/mailinglists/routes.js';
 import { registerSubscribeRoutes } from './modules/mailinglists/subscribeRoutes.js';
-import { sendEmail } from './providers/smtp.js';
+import { sendEmail, EmailRoutingError } from './providers/smtp.js';
 import { createRequire } from 'module';
 import { getSigningKey } from './auth/jwks.js';
 import jwt from 'jsonwebtoken';
@@ -847,10 +847,14 @@ export function buildApp() {
         testMode: testEmail ? 'Test SMTP used' : 'Production SMTP used'
       };
     } catch (e: any) {
-      return reply.internalServerError(e.message);
+      if (e instanceof EmailRoutingError) {
+        return reply.code(400).send({ error: 'Invalid email routing', message: e.message });
+      }
+      req.log.error(e);
+      return reply.internalServerError('Failed to send email');
     }
   });
-  
+
   // Simple test token endpoint for test page
   app.post('/api/test-token', async (req, reply) => {
     try {
@@ -908,10 +912,14 @@ export function buildApp() {
         testMode: testEmail ? 'Test SMTP used' : 'Production SMTP used'
       };
     } catch (e: any) {
-      return reply.internalServerError(e.message);
+      if (e instanceof EmailRoutingError) {
+        return reply.code(400).send({ error: 'Invalid email routing', message: e.message });
+      }
+      req.log.error(e);
+      return reply.internalServerError('Failed to send email');
     }
   });
-  
+
   // Simple test email endpoint (auth optional depending on flags)
   app.post('/test-email', { preHandler: (req, reply) => app.authenticate(req, reply) }, async (req, reply) => {
     const { to, subject, html, text, tenantId, appId, testEmail } = (req.body as any) || {};
@@ -920,7 +928,11 @@ export function buildApp() {
       await sendEmail({ to, subject, html, text, tenantId, appId, testEmail });
       return { ok: true };
     } catch (e: any) {
-      return reply.internalServerError(e.message);
+      if (e instanceof EmailRoutingError) {
+        return reply.code(400).send({ error: 'Invalid email routing', message: e.message });
+      }
+      req.log.error(e);
+      return reply.internalServerError('Failed to send email');
     }
   });
 
