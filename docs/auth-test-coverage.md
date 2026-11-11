@@ -132,9 +132,10 @@ This document outlines the comprehensive test suite created to validate the secu
 ## Test Execution Results
 
 ### Current Status
-- **Security Utilities**: ✅ 19/22 tests passing (fixed remaining 3)
-- **Core Authentication**: ⏳ Ready for execution
-- **Integration Tests**: ⏳ Ready for execution
+
+This document records the test suite as designed; it is not a live status
+report. For current pass/fail results see `tests/reports/latest.json` (and the
+timestamped `test-report-*.json` files produced by `tests/run-tests.sh`).
 
 ### Failed Tests Fixed
 1. **Malformed Hash Handling**: Updated to handle bcrypt exceptions properly
@@ -166,11 +167,14 @@ npm test -- test/auth-secure-app.test.ts
 npm test -- test/security-utilities.test.ts  
 npm test -- test/auth-integration-endpoints.test.ts
 
-# Run specific test suites
-npm test -- --grep "Secure Mode"
-npm test -- --grep "Security Edge Cases"
-npm test -- --grep "Performance"
+# Run specific tests by name (Vitest; Jest's --grep is not supported)
+npx vitest run test/auth-secure-app.test.ts -t "Secure Mode"
+npx vitest run test/auth-secure-app.test.ts -t "Security Edge Cases"
+npx vitest run test/security-utilities.test.ts -t "Performance"
 ```
+
+A full run with JSON output is available via `tests/run-tests.sh`; results land
+in `tests/reports/latest.json`.
 
 ### CI/CD Integration
 - Include in pre-commit hooks

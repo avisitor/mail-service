@@ -138,10 +138,9 @@ journalctl -u mail-service --since "1 hour ago"
 The service includes security hardening:
 
 - **NoNewPrivileges**: Prevents privilege escalation
-- **PrivateTmp**: Private /tmp directory
-- **ProtectSystem**: Read-only system directories
-- **ProtectHome**: No access to user home directories
-- **ReadWritePaths**: Limited write access to logs and uploads only
+
+`mail-service.service` currently sets only `NoNewPrivileges=true`; it does not
+configure `PrivateTmp`, `ProtectSystem`, `ProtectHome`, or `ReadWritePaths`.
 
 ## Troubleshooting
 

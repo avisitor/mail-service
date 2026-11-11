@@ -38,18 +38,28 @@ Enhanced migration script that avoids duplicates by only importing records newer
 
 ## Configuration
 
-Both scripts use the following configuration that can be modified at the top of each file:
+The two scripts resolve credentials differently:
 
-- **Database credentials**: `DB_USER`, `DB_PASS`, `DB_HOST`
-- **App IDs**: 
+- **`migrate-maillog-data.sh`**: `DB_USER` / `DB_PASS` (defaults at the top of the script).
+- **`migrate-maillog-data-safe.sh`**: reads credentials from environment files, not from `DB_USER`/`DB_PASS`:
+  - `/var/www/html/mail-service/.env` (`DATABASE_URL`) for the target database
+  - `/var/www/html/retree-hawaii/.env` (`DB_USERNAME`, `DB_PASSWORD`, …)
+  - `/var/www/html/outings/.env.s` (`DB_USER`, `DB_PASSWORD`, …)
+  - `/var/www/html/outings/.env.maunaala` (`DB_USER`, `DB_PASSWORD`, …)
+
+Other configuration:
+
+- **App IDs**:
   - ReTree Hawaii: `cmfka688r0001b77ofpgm57ix`
   - Outings: `outings-app-id`
+  - Maunaala: `maunaala-app-id`
 - **Default record limit**: 10 records per source
 
 ## Source Databases
 
 - **retreehawaii.maillog**: Email logs from the ReTree Hawaii application
 - **outings.maillog**: Email logs from the Outings application
+- **maunaala.maillog**: Email logs from the Outings Maunaala deployment
 
 ## Target Database
 
@@ -70,7 +80,7 @@ Both scripts use the following configuration that can be modified at the top of 
 
 ## Generated Fields
 
-- **id**: `retree-{uuid}` or `outings-{uuid}` for unique identification
+- **id**: `retree-{uuid}`, `outings-{uuid}` or `maunaala-{uuid}` for unique identification
 - **appId**: Assigned based on source database for filtering in the UI
 
 ## Monitoring

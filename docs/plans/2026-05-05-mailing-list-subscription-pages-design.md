@@ -1,7 +1,9 @@
 # Mailing List Public Subscription Pages — Design
 
 Date: 2026-05-05
-Status: Draft, awaiting approval before implementation
+
+> **Status:** implemented
+> **Verified:** 2026-11-09
 
 ## 1. Goal
 

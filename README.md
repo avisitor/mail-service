@@ -2,6 +2,13 @@
 
 Independent multi-tenant email subsystem (Fastify + TypeScript) providing template rendering, message scheduling, sending, and logging with OAuth2/JWT auth.
 
+## Documentation
+
+- [SERVICE-SETUP.md](SERVICE-SETUP.md) — systemd service installation and operations
+- [DEBUG.md](DEBUG.md) — debugging the running service
+- [BACKUP_README.md](BACKUP_README.md) — database backup and restore
+- [FRONTEND.md](FRONTEND.md) — frontend/UI architecture
+
 ## High-Level Features (Phase 1)
 - OAuth2 client credentials for app authentication (pluggable provider)
 - JWT end-user passthrough (optional) for audit
@@ -28,32 +35,39 @@ Before getting started, ensure you have the following installed:
 ## Stack
 - Node.js (>=18), TypeScript
 - Fastify for HTTP
-- Prisma (MySQL) or Knex (choose via ENV); default SQL schema provided
-- Nodemailer provider abstraction (swap for SES/SMTP later)
+- Prisma (MySQL)
+- Nodemailer provider abstraction (SES/SMTP providers in `src/providers/`)
 
 ## Directory Layout
 ```
 src/
   app.ts              # Fastify bootstrap
   server.ts           # CLI entrypoint
-  config/             # Configuration loading & validation
+  config.ts           # Configuration loading & validation
+  config/             # Batch/rate-limit configuration
   auth/               # OAuth2/JWT middlewares & types
-  db/                 # Prisma or query builder init
+  db/                 # Prisma client + in-process state
+  frontend/           # Admin UI (HTML/CSS/TS)
   modules/
-    templates/
-    groups/
-    recipients/
-    messages/
-    events/
-    suppression/
-  plugins/            # Fastify plugins (logging, security headers)
-  queue/              # Scheduling & worker loop
-  rendering/          # Mustache renderer + variable extraction
+    apps/             # App CRUD
+    compose/          # Email composition, tracking pixel
+    logs/             # Mail log API
+    mailinglists/     # Mailing lists + public subscription pages
+    sms/              # SMS configuration and sending
+    smtp/             # SMTP provider configuration
+    templates/        # Template CRUD + rendering
+    tenants/          # Tenant management
+    webhooks/         # Inbound hooks (verification email)
+    worker/           # Scheduler & sending worker loop
+  providers/          # SMTP and SMS send providers
+  routes/             # Standalone routes (health)
+  security/           # Secret encryption helpers
   utils/              # Shared helpers
  prisma/               # Prisma schema (if using Prisma)
  migrations/          # SQL migrations (if using raw SQL)
  scripts/             # One-off maintenance scripts
  test/                # Unit/integration tests
+ tests/               # SES/SMS integration suites + runner
  docs/                # Architecture & API docs
 ```
 
@@ -130,7 +144,7 @@ For development and testing without authentication setup:
 
 This starts the service with:
 - Authentication disabled
-- In-memory database  
+- MySQL database (`DATABASE_URL`, default `mysql://user:pass@localhost:3306/mailservice`; no in-memory fallback)
 - SMTP dry-run mode (emails logged but not sent)
 
 **Note**: Set `SMTP_DRY_RUN=false` and configure real SMTP credentials in `.env` for actual email delivery.
@@ -205,10 +219,10 @@ First, ensure your app exists in the database. Then generate a client secret:
 
 ```bash
 # List all apps to find your app ID
-node generate-app-secret.mjs --list-apps
+node development/generate-app-secret.mjs --list-apps
 
 # Generate secret for your app (replace with actual app ID)
-node generate-app-secret.mjs your-app-id-here
+node development/generate-app-secret.mjs your-app-id-here
 ```
 
 **Important**: Save the generated client secret securely - it will not be shown again!
@@ -1099,10 +1113,10 @@ NODE_ENV=development
 **Client Secret Management:**
 ```bash
 # List all apps and their security status
-node generate-app-secret.mjs --list-apps
+node development/generate-app-secret.mjs --list-apps
 
 # Generate new secret (invalidates old one)
-node generate-app-secret.mjs your-app-id
+node development/generate-app-secret.mjs your-app-id
 
 # Check app authentication status via API
 curl -X POST https://your-mail-service/api/token \
@@ -1216,7 +1230,7 @@ aws sesv2 get-email-identity \
 
 #### Validating before a full run
 
-Run `./run-tests.sh --diagnose`. A `MessageRejected: Email address is not verified` means the sender identity is still absent/unverified in the **test account + region**, not a code bug. You can confirm which account the test keys resolve to with:
+Run `tests/run-tests.sh --diagnose`. A `MessageRejected: Email address is not verified` means the sender identity is still absent/unverified in the **test account + region**, not a code bug. You can confirm which account the test keys resolve to with:
 
 ```bash
 AWS_ACCESS_KEY_ID="$AWS_SES_ACCESS_KEY" \
@@ -1334,16 +1348,6 @@ curl http://localhost:3100/ui/
 npm run validate:html
 npm run lint:js
 ```
-
-## Next Steps
-- Flesh out Prisma schema & initial migration
-- Implement auth middleware & tenant scoping
-- Implement template endpoints
-- Implement message group + recipient ingestion
-- Add scheduler worker
-- Add open tracking pixel route
-- Flesh out /test-email to support multiple recipients
-- Add suppression list management UI
 
 ## License
 TBD
