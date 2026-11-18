@@ -10,6 +10,8 @@ declare global {
 // Make this file a module
 export {};
 
+import { resolveNewTemplateTitle } from './template-editor-name.js';
+
 // Debug system for comprehensive view flow tracking
 const DEBUG_VIEW_FLOW = true;
 
@@ -1909,27 +1911,37 @@ class TemplateEditorView implements IView {
 
   private async saveNewTemplate(): Promise<void> {
     const formData = this.getFormData();
-    
-    if (!formData.title.trim()) {
+
+    const title = resolveNewTemplateTitle({
+      currentTitle: this.currentTemplate?.title,
+      formTitle: formData.title
+    });
+
+    if (!title) {
       this.showStatus('Template title is required');
       return;
     }
-    
+
     try {
       const newTemplate = await api('/templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           appId: this.currentAppId,
-          title: formData.title,
+          title,
           subject: formData.subject,
-          content: formData.content
+          content: formData.content,
+          version: 1
         })
       });
-      
+
+      // Reflect the name that was actually saved in the form.
+      const titleInput = document.getElementById('templateTitle') as HTMLInputElement;
+      if (titleInput) titleInput.value = title;
+
       this.showStatus('Template saved successfully');
       await this.loadData(); // Refresh dropdown
-      
+
       if (this.returnUrl) {
         window.location.href = this.returnUrl;
       }

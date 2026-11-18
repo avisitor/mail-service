@@ -167,4 +167,44 @@ describe('Authentication & Authorization', () => {
       expect(res.headers.location).toContain('idp.worldspot.org');
     });
   });
+
+  describe('Integrated view routes', () => {
+    it('forwards the verified token when redirecting to the template editor', async () => {
+      const token = createTestToken({
+        sub: 'admin@example.com',
+        roles: ['tenant_admin'],
+        tenantId: TEST_TENANT_ID,
+        appId: TEST_APP_ID
+      });
+
+      const res = await fastifyApp.inject({
+        method: 'GET',
+        url: `/template-editor?appId=${TEST_APP_ID}&token=${encodeURIComponent(token)}`
+      });
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('/ui?');
+      expect(res.headers.location).toContain('view=template-editor');
+      expect(res.headers.location).toContain(`token=${encodeURIComponent(token)}`);
+    });
+
+    it('forwards the verified token when redirecting to the SMS logs view', async () => {
+      const token = createTestToken({
+        sub: 'admin@example.com',
+        roles: ['tenant_admin'],
+        tenantId: TEST_TENANT_ID,
+        appId: TEST_APP_ID
+      });
+
+      const res = await fastifyApp.inject({
+        method: 'GET',
+        url: `/sms-logs?appId=${TEST_APP_ID}&token=${encodeURIComponent(token)}`
+      });
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('/ui?');
+      expect(res.headers.location).toContain('view=sms-logs');
+      expect(res.headers.location).toContain(`token=${encodeURIComponent(token)}`);
+    });
+  });
 });

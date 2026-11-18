@@ -606,12 +606,12 @@ export function buildApp() {
     const { isAuthenticated } = await checkAuthentication(req);
     
     if (isAuthenticated) {
-      // User is authenticated, show template editor interface
-      const templateEditorParams = new URLSearchParams({
-        view: 'template-editor',
-        ...(appId && { appId }),
-        ...(returnUrl && { returnUrl })
-      });
+      // User is authenticated, show template editor interface.
+      // Pass through ALL query parameters (including the token we just
+      // verified) so the UI does not fall back to a stale token in
+      // localStorage.
+      const templateEditorParams = new URLSearchParams(req.query as any);
+      templateEditorParams.set('view', 'template-editor');
       return reply.redirect(`/ui?${templateEditorParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern
@@ -666,12 +666,10 @@ export function buildApp() {
         return reply.code(403).send({ error: 'Insufficient permissions' });
       }
       
-      // User is authenticated and has admin role, show apps management interface
-      const adminParams = new URLSearchParams({
-        view: 'apps',
-        ...(appId && { appId }),
-        ...(returnUrl && { returnUrl })
-      });
+      // User is authenticated and has admin role, show apps management interface.
+      // Preserve the verified token and all other query parameters.
+      const adminParams = new URLSearchParams(req.query as any);
+      adminParams.set('view', 'apps');
       console.log('[/admin] Redirecting to UI with params:', adminParams.toString());
       return reply.redirect(`/ui?${adminParams}`);
     } else {
@@ -787,12 +785,10 @@ export function buildApp() {
         return reply.code(403).send({ error: 'Insufficient permissions' });
       }
       
-      // User is authenticated and has admin role, show SMS logs interface
-      const smsLogsParams = new URLSearchParams({
-        view: 'sms-logs',
-        ...(appId && { appId }),
-        ...(returnUrl && { returnUrl })
-      });
+      // User is authenticated and has admin role, show SMS logs interface.
+      // Preserve the verified token and all other query parameters.
+      const smsLogsParams = new URLSearchParams(req.query as any);
+      smsLogsParams.set('view', 'sms-logs');
       return reply.redirect(`/ui?${smsLogsParams}`);
     } else {
       // User not authenticated, redirect to IDP using the working pattern

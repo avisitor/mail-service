@@ -13,7 +13,7 @@ yarn-error.log*
 .*~
 
 # Compiled frontend files (generated from TypeScript)
-src/frontend/main.js
+src/frontend/*.js
 src/frontend/main.js.map
 
 # Backups
