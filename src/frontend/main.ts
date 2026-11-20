@@ -11,6 +11,7 @@ declare global {
 export {};
 
 import { resolveNewTemplateTitle } from './template-editor-name.js';
+import { applyFooterLines, parseFooterLines, FooterLine } from './footer-lines.js';
 
 // Debug system for comprehensive view flow tracking
 const DEBUG_VIEW_FLOW = true;
@@ -804,6 +805,7 @@ class ComposeView implements IView {
   private fromNameFromUrl: string = '';
   private testEmailFromUrl: string = '';
   private participantContextData: any[] = [];
+  private footerLines: FooterLine[] = [];
   private isRestoringState = false;
 
   constructor() {
@@ -841,6 +843,7 @@ class ComposeView implements IView {
     const fromAddressFromUrl = getParam('fromAddress');
     const fromNameFromUrl = getParam('fromName');
     const testEmailFromUrl = getParam('testEmail');
+    const footerLinesFromUrl = getParam('footerLines');
     
     // Set currentAppId for this view
     if (appIdFromUrl) {
@@ -912,6 +915,12 @@ class ComposeView implements IView {
       } catch (error) {
         console.warn('[ComposeView] Failed to parse participant context data:', error);
       }
+    }
+
+    // Handle app-supplied footer lines if provided
+    if (footerLinesFromUrl) {
+      this.footerLines = parseFooterLines(footerLinesFromUrl);
+      console.log('[ComposeView] Footer lines from URL:', this.footerLines);
     }
 
     if (appIdFromUrl) {
@@ -1202,6 +1211,12 @@ class ComposeView implements IView {
       height: 400,
       onContentChange: () => this.saveState()
     });
+    await this.waitForTinyMCE();
+    this.setEditorContent(TinyMCEManager.getContent('#messageContent'));
+  }
+
+  private setEditorContent(html: string): void {
+    TinyMCEManager.setContent('#messageContent', applyFooterLines(html || '', this.footerLines));
   }
 
   private async onTemplateSelected(template: TemplateRecord | null): Promise<void> {
@@ -1214,16 +1229,13 @@ class ComposeView implements IView {
 
     // Update form with template data
     const subjectInput = document.querySelector('#subject') as HTMLInputElement;
-    const contentTextarea = document.querySelector('#messageContent') as HTMLTextAreaElement;
     
     if (subjectInput) {
       subjectInput.value = template.subject || '';
     }
     
     console.log('[ComposeView] About to set template content:', template.content);
-    if (contentTextarea) {
-      TinyMCEManager.setContent('#messageContent', template.content || '');
-    }
+    this.setEditorContent(template.content || '');
     
     // Save state after setting template data
     this.saveState();
@@ -1247,15 +1259,14 @@ class ComposeView implements IView {
       
       // Populate form with the previous message data
       const subjectInput = document.querySelector('#subject') as HTMLInputElement;
-      const contentTextarea = document.querySelector('#messageContent') as HTMLTextAreaElement;
       
       if (subjectInput && messageContent.subject) {
         subjectInput.value = messageContent.subject;
       }
       
       console.log('[ComposeView] About to set previous message content:', messageContent.message);
-      if (contentTextarea && messageContent.message) {
-        TinyMCEManager.setContent('#messageContent', messageContent.message);
+      if (messageContent.message) {
+        this.setEditorContent(messageContent.message);
       }
       
       console.log('[ComposeView] Loaded previous message:', messageContent.subject);
@@ -1269,15 +1280,12 @@ class ComposeView implements IView {
 
   private clearTemplateContent(): void {
     const subjectInput = document.querySelector('#subject') as HTMLInputElement;
-    const contentTextarea = document.querySelector('#messageContent') as HTMLTextAreaElement;
     
     if (subjectInput) {
       subjectInput.value = '';
     }
     
-    if (contentTextarea) {
-      TinyMCEManager.setContent('#messageContent', '');
-    }
+    this.setEditorContent('');
   }
 
   private async loadComposeData(): Promise<void> {
@@ -1523,7 +1531,7 @@ class ComposeView implements IView {
     if (formData.content) {
       console.log('[ComposeView] Setting content, waiting for TinyMCE readiness...');
       await this.waitForTinyMCE();
-      TinyMCEManager.setContent('#messageContent', formData.content);
+      this.setEditorContent(formData.content);
       console.log('[ComposeView] Content set');
     }
     if (fromAddress && formData.fromAddress) {
