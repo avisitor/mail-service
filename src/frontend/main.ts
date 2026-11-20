@@ -917,10 +917,10 @@ class ComposeView implements IView {
       }
     }
 
-    // Handle app-supplied footer lines if provided
-    if (footerLinesFromUrl) {
-      this.footerLines = parseFooterLines(footerLinesFromUrl);
-      console.log('[ComposeView] Footer lines from URL:', this.footerLines);
+    // Handle app-supplied footer lines if provided (reset on each activation)
+    this.footerLines = footerLinesFromUrl ? parseFooterLines(footerLinesFromUrl) : [];
+    if (this.footerLines.length) {
+      console.log('[ComposeView] Footer lines from URL:', this.footerLines.length);
     }
 
     if (appIdFromUrl) {
@@ -1075,6 +1075,9 @@ class ComposeView implements IView {
 
   saveState(): any {
     if (!this.currentAppId) return null;
+    // Never persist state while restoring: the editor's change event fires before
+    // the saved draft has been applied to the form.
+    if (this.isRestoringState) return null;
     
     try {
       const formData = this.getFormData();
@@ -1211,8 +1214,18 @@ class ComposeView implements IView {
       height: 400,
       onContentChange: () => this.saveState()
     });
-    await this.waitForTinyMCE();
-    this.setEditorContent(TinyMCEManager.getContent('#messageContent'));
+    // Apply footer lines to the current content. This fires the editor's change event,
+    // which saves state — and on the restore path this runs before the saved draft is
+    // applied, so suppress state saving while it happens.
+    if (this.footerLines.length && window.tinymce) {
+      await this.waitForTinyMCE();
+      this.isRestoringState = true;
+      try {
+        this.setEditorContent(TinyMCEManager.getContent('#messageContent'));
+      } finally {
+        this.isRestoringState = false;
+      }
+    }
   }
 
   private setEditorContent(html: string): void {
