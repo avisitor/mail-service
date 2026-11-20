@@ -10,6 +10,7 @@ describe('Secure App Authentication', () => {
   let prisma: any;
   let testTenantId: string;
   let testAppId: string;
+  let testClientId: string;
   let testClientSecret: string;
   let testClientSecretHash: string;
 
@@ -22,6 +23,19 @@ describe('Secure App Authentication', () => {
     testClientSecret = generateClientSecret();
     testClientSecretHash = await hashClientSecret(testClientSecret);
 
+    // Sweep orphans left by killed/failed runs (legacy fixed fixture names
+    // plus any unique-suffixed leftovers) so the App.clientId unique
+    // constraint can never trip the create below.
+    await prisma.app.deleteMany({
+      where: {
+        OR: [
+          { clientId: { in: ['test-auth-client', 'no-secret-client'] } },
+          { clientId: { startsWith: 'test-auth-client-' } },
+          { clientId: { startsWith: 'no-secret-client-' } }
+        ]
+      }
+    });
+
     // Create test tenant
     const tenant = await prisma.tenant.create({
       data: {
@@ -31,12 +45,16 @@ describe('Secure App Authentication', () => {
     });
     testTenantId = tenant.id;
 
+    // Unique clientId per test run: App.clientId is @unique, and a fixed
+    // fixture string collides with orphan rows from killed runs.
+    testClientId = `test-auth-client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     // Create test app with client secret
     const app = await prisma.app.create({
       data: {
         tenantId: testTenantId,
         name: 'Test Auth App',
-        clientId: 'test-auth-client',
+        clientId: testClientId,
         clientSecret: testClientSecretHash
       }
     });
@@ -45,9 +63,17 @@ describe('Secure App Authentication', () => {
 
   afterEach(async () => {
     if (prisma) {
-      // Clean up test data
-      await prisma.app.deleteMany({ where: { tenantId: testTenantId } });
-      await prisma.tenant.delete({ where: { id: testTenantId } });
+      // Clean up test data. Guard each condition: if beforeEach failed
+      // partway, an undefined field would broaden the deleteMany match.
+      const appConditions: object[] = [];
+      if (testTenantId) appConditions.push({ tenantId: testTenantId });
+      if (testClientId) appConditions.push({ clientId: testClientId });
+      if (appConditions.length > 0) {
+        await prisma.app.deleteMany({ where: { OR: appConditions } });
+      }
+      if (testTenantId) {
+        await prisma.tenant.delete({ where: { id: testTenantId } });
+      }
     }
     if (fastifyApp) {
       await fastifyApp.close();
@@ -92,7 +118,7 @@ describe('Secure App Authentication', () => {
         url: '/api/token',
         headers: { 'Content-Type': 'application/json' },
         payload: {
-          appId: 'test-auth-client', // Using clientId instead of ID
+          appId: testClientId, // Using clientId instead of ID
           clientSecret: testClientSecret,
           type: 'application'
         }
@@ -104,7 +130,7 @@ describe('Secure App Authentication', () => {
       
       const decoded = jwt.decode(data.token) as any;
       expect(decoded.appId).toBe(testAppId); // Should resolve to actual app ID
-      expect(decoded.clientId).toBe('test-auth-client');
+      expect(decoded.clientId).toBe(testClientId);
     });
 
     it('should reject request with missing client secret', async () => {
@@ -164,7 +190,7 @@ describe('Secure App Authentication', () => {
         data: {
           tenantId: testTenantId,
           name: 'App Without Secret',
-          clientId: 'no-secret-client'
+          clientId: `no-secret-client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           // clientSecret: null
         }
       });
@@ -311,7 +337,7 @@ describe('Secure App Authentication', () => {
       expect(decoded.header.alg).toBeDefined();
       expect(decoded.payload.sub).toBe(`app:${testAppId}`);
       expect(decoded.payload.appId).toBe(testAppId);
-      expect(decoded.payload.clientId).toBe('test-auth-client');
+      expect(decoded.payload.clientId).toBe(testClientId);
       expect(decoded.payload.tenantId).toBe(testTenantId);
       expect(decoded.payload.roles).toEqual(['app']);
       expect(decoded.payload.iss).toBe(config.auth.issuer);
