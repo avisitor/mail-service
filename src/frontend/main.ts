@@ -1216,14 +1216,19 @@ class ComposeView implements IView {
     });
     // Apply footer lines to the current content. This fires the editor's change event,
     // which saves state — and on the restore path this runs before the saved draft is
-    // applied, so suppress state saving while it happens.
-    if (this.footerLines.length && window.tinymce) {
-      await this.waitForTinyMCE();
+    // applied, so suppress state saving while it happens. The window.tinymce check only
+    // avoids waiting for an editor that will never arrive; the write itself still goes
+    // through TinyMCEManager.setContent's textarea fallback.
+    if (this.footerLines.length) {
+      if (window.tinymce) {
+        await this.waitForTinyMCE();
+      }
+      const previousRestoring = this.isRestoringState;
       this.isRestoringState = true;
       try {
         this.setEditorContent(TinyMCEManager.getContent('#messageContent'));
       } finally {
-        this.isRestoringState = false;
+        this.isRestoringState = previousRestoring;
       }
     }
   }
@@ -1543,7 +1548,9 @@ class ComposeView implements IView {
     }
     if (formData.content) {
       console.log('[ComposeView] Setting content, waiting for TinyMCE readiness...');
-      await this.waitForTinyMCE();
+      if (window.tinymce) {
+        await this.waitForTinyMCE();
+      }
       this.setEditorContent(formData.content);
       console.log('[ComposeView] Content set');
     }
