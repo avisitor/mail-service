@@ -31,6 +31,28 @@ describe('applyFooterLines', () => {
     const out = applyFooterLines('<p>x</p>', [{ id: 'a"b', html: '<div id="a&quot;b">X</div>' }]);
     expect(out).toContain('X');
   });
+
+  it('removes an existing element whose id has selector-special characters', () => {
+    const out = applyFooterLines('<p>x</p><div id="a&quot;b">old</div>', [
+      { id: 'a"b', html: '<div id="a&quot;b">new</div>' },
+    ]);
+    expect(out).toContain('<p>x</p>');
+    expect(out).not.toContain('old');
+    expect(out).toContain('new');
+  });
+
+  it('removes an existing element whose id contains a newline', () => {
+    const out = applyFooterLines('<p>x</p><div id="a&#10;b">old</div>', [
+      { id: 'a\nb', html: '<div id="a&#10;b">new</div>' },
+    ]);
+    expect(out).toContain('<p>x</p>');
+    expect(out).not.toContain('old');
+    expect(out).toContain('new');
+  });
+
+  it('leaves content alone when no line is usable', () => {
+    expect(applyFooterLines('<p>x</p>', [{ id: '', html: '' }])).toBe('<p>x</p>');
+  });
 });
 
 describe('parseFooterLines', () => {
@@ -38,5 +60,11 @@ describe('parseFooterLines', () => {
     expect(parseFooterLines(JSON.stringify([{ id: 'a', html: '<b>x</b>' }]))).toHaveLength(1);
     expect(parseFooterLines('not-json')).toEqual([]);
     expect(parseFooterLines(null)).toEqual([]);
+  });
+
+  it('rejects entries whose html is missing or not a string', () => {
+    expect(parseFooterLines('[{"id":"a"}]')).toEqual([]);
+    expect(parseFooterLines('[{"id":"a","html":123}]')).toEqual([]);
+    expect(parseFooterLines('[{"id":"a","html":"<b>x</b>"},{"id":"b"}]')).toHaveLength(1);
   });
 });
